@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AmcoLogs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/app.css?v=6">
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="brand">
+        <span class="brand-mark">AL</span>
+        <div class="brand-text">
+          <strong class="brand-wordmark">AmcoLogs</strong>
+          <small>CTVM log desk</small>
+        </div>
+      </div>
+
+      <ol class="pipeline">
+        <li data-step="1" class="active">
+          <button type="button" class="pipeline-btn" data-step="1">
+            <span class="step">1</span>
+            <div>
+              <strong>Excel</strong>
+              <small>EticketTransactionResult</small>
+            </div>
+          </button>
+        </li>
+        <li data-step="2">
+          <button type="button" class="pipeline-btn" data-step="2">
+            <span class="step">2</span>
+            <div>
+              <strong>ThingsBoard</strong>
+              <small>ServiceAccountID → IP</small>
+            </div>
+          </button>
+        </li>
+        <li data-step="3">
+          <button type="button" class="pipeline-btn" data-step="3">
+            <span class="step">3</span>
+            <div>
+              <strong>Download logs</strong>
+              <small>Fixed / mobile</small>
+            </div>
+          </button>
+        </li>
+      </ol>
+
+      <nav class="db-nav">
+        <p class="db-nav-title">Database</p>
+        <button type="button" class="db-link" data-db="errors">Error reports</button>
+        <button type="button" class="db-link" data-db="ips">CTVM IPs</button>
+        <button type="button" class="db-link" data-db="excel">Excel archive</button>
+        <p id="db-dot" class="db-dot">MySQL offline</p>
+      </nav>
+    </aside>
+
+    <main class="stage">
+      <header class="stage-head">
+        <div>
+          <p id="kicker" class="kicker">Βήμα 1 από 3</p>
+          <h1 id="stage-title">Εισαγωγή Excel</h1>
+          <p id="stage-lede" class="lede">Άσε το Excel. Διάλεξε κατηγορία 01–04 και συνέχισε στα επόμενα βήματα με τις ίδιες συσκευές.</p>
+        </div>
+      </header>
+
+      <section id="step-excel">
+        <section id="dropzone" class="dropzone">
+          <input id="file-input" type="file" accept=".xlsx,.xlsm" hidden>
+          <p class="drop-title">Drop Excel εδώ</p>
+          <p class="drop-copy">ή <button type="button" id="browse">επίλεξε αρχείο</button> · .xlsx</p>
+        </section>
+        <p id="status-line" class="status-line" hidden></p>
+        <section id="summary" class="summary" hidden></section>
+        <section id="categories" class="categories" hidden></section>
+        <section id="selection" class="selection" hidden></section>
+      </section>
+
+      <section id="step-thingsboard" hidden>
+        <section id="tb-body" class="panel-block"></section>
+      </section>
+
+      <section id="step-download" hidden>
+        <section id="dl-body" class="panel-block"></section>
+      </section>
+
+      <section id="db-view" hidden>
+        <section class="panel-block db-connect">
+          <p id="db-status" class="db-status pending">Checking MySQL…</p>
+          <details>
+            <summary>Connection</summary>
+            <form id="db-form" class="db-form">
+              <label>Host <input name="host" value="localhost" autocomplete="off"></label>
+              <label>Port <input name="port" type="number" value="3306"></label>
+              <label>User <input name="user" value="root" autocomplete="off"></label>
+              <label>Password <input name="password" type="password" autocomplete="current-password"></label>
+              <label>Database <input name="database" value="amco_logs" autocomplete="off"></label>
+              <button type="submit">Connect and create database</button>
+            </form>
+          </details>
+        </section>
+        <section id="db-body" class="panel-block"></section>
+      </section>
+    </main>
+  </div>
+  <script src="/js/app.js?v=7"></script>
+</body>
+</html>

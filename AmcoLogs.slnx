@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AmcoLogs.Core/AmcoLogs.Core.csproj" />
+    <Project Path="src/AmcoLogs.Infrastructure/AmcoLogs.Infrastructure.csproj" />
+    <Project Path="src/AmcoLogs.Web/AmcoLogs.Web.csproj" />
+  </Folder>
+</Solution>
