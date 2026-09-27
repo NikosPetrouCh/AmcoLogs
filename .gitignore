@@ -7,9 +7,7 @@
 .env
 appsettings.Local.json
 
-# Local MySQL connection and downloaded logs
-.amco-logs/
-data/
+samples/
 
 # User-specific files
 *.rsuser

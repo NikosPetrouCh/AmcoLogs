@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AmcoLogs.Core.Excel;
+using AmcoLogs.Core.Logs;
 using AmcoLogs.Core.Persistence;
 using MySqlConnector;
 
@@ -235,7 +236,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                 mobility = VALUES(mobility),
                 source = VALUES(source),
                 updated_at = VALUES(updated_at),
-                bus_no = VALUES(bus_no);
+                bus_no = COALESCE(VALUES(bus_no), bus_no);
             """, connection);
         command.Parameters.AddWithValue("@id", mapping.ServiceAccountId);
         command.Parameters.AddWithValue("@ip", mapping.IpAddress);
@@ -299,6 +300,108 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         }
     }
 
+    public async Task SaveFindingsAsync(IReadOnlyList<InvestigationFinding> findings, CancellationToken cancellationToken = default)
+    {
+        var settings = RequireSettings();
+        await using var connection = new MySqlConnection(BuildConnectionString(settings, includeDatabase: true));
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        foreach (var finding in findings)
+        {
+            await using var insert = new MySqlCommand(
+                """
+                INSERT INTO investigation_findings (
+                    id, transaction_id, rrn, amount, transaction_date, service_account_id,
+                    mobility, product, log_file_name, log_day, line_start, line_end,
+                    line_count, error_count, verdict, errors_json, created_at)
+                VALUES (
+                    @id, @transactionId, @rrn, @amount, @transactionDate, @serviceAccountId,
+                    @mobility, @product, @logFileName, @logDay, @lineStart, @lineEnd,
+                    @lineCount, @errorCount, @verdict, @errorsJson, @createdAt);
+                """, connection, transaction);
+
+            insert.Parameters.AddWithValue("@id", finding.Id.ToString());
+            insert.Parameters.AddWithValue("@transactionId", (object?)finding.TransactionId ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@rrn", (object?)finding.Rrn ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@amount", (object?)finding.Amount ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@transactionDate", (object?)finding.TransactionDate ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@serviceAccountId", (object?)finding.ServiceAccountId ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@mobility", finding.Mobility);
+            insert.Parameters.AddWithValue("@product", (object?)finding.Product ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@logFileName", (object?)finding.LogFileName ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@logDay", (object?)finding.LogDay ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@lineStart", (object?)finding.LineStart ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@lineEnd", (object?)finding.LineEnd ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@lineCount", finding.LineCount);
+            insert.Parameters.AddWithValue("@errorCount", finding.ErrorCount);
+            insert.Parameters.AddWithValue("@verdict", finding.Verdict);
+            insert.Parameters.AddWithValue("@errorsJson", JsonSerializer.Serialize(finding.Errors));
+            insert.Parameters.AddWithValue("@createdAt", finding.CreatedAt);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<InvestigationFinding>> ListFindingsAsync(int take = 500, CancellationToken cancellationToken = default)
+    {
+        var settings = CurrentSettings();
+        if (settings is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            await using var connection = new MySqlConnection(BuildConnectionString(settings, includeDatabase: true));
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new MySqlCommand(
+                """
+                SELECT id, transaction_id, rrn, amount, transaction_date, service_account_id,
+                       mobility, product, log_file_name, log_day, line_start, line_end,
+                       line_count, error_count, verdict, errors_json, created_at
+                FROM investigation_findings
+                ORDER BY created_at DESC
+                LIMIT @take;
+                """, connection);
+            command.Parameters.AddWithValue("@take", take);
+
+            var results = new List<InvestigationFinding>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var errorsJson = reader.IsDBNull(reader.GetOrdinal("errors_json")) ? "[]" : reader.GetString("errors_json");
+                results.Add(new InvestigationFinding
+                {
+                    Id = Guid.Parse(reader.GetString("id")),
+                    TransactionId = reader.IsDBNull(reader.GetOrdinal("transaction_id")) ? null : reader.GetString("transaction_id"),
+                    Rrn = reader.IsDBNull(reader.GetOrdinal("rrn")) ? null : reader.GetString("rrn"),
+                    Amount = reader.IsDBNull(reader.GetOrdinal("amount")) ? null : reader.GetDecimal("amount"),
+                    TransactionDate = reader.IsDBNull(reader.GetOrdinal("transaction_date")) ? null : reader.GetDateTime("transaction_date"),
+                    ServiceAccountId = reader.IsDBNull(reader.GetOrdinal("service_account_id")) ? null : reader.GetString("service_account_id"),
+                    Mobility = reader.GetString("mobility"),
+                    Product = reader.IsDBNull(reader.GetOrdinal("product")) ? null : reader.GetString("product"),
+                    LogFileName = reader.IsDBNull(reader.GetOrdinal("log_file_name")) ? null : reader.GetString("log_file_name"),
+                    LogDay = reader.IsDBNull(reader.GetOrdinal("log_day")) ? null : reader.GetString("log_day"),
+                    LineStart = reader.IsDBNull(reader.GetOrdinal("line_start")) ? null : reader.GetInt32("line_start"),
+                    LineEnd = reader.IsDBNull(reader.GetOrdinal("line_end")) ? null : reader.GetInt32("line_end"),
+                    LineCount = reader.GetInt32("line_count"),
+                    ErrorCount = reader.GetInt32("error_count"),
+                    Verdict = reader.GetString("verdict"),
+                    Errors = JsonSerializer.Deserialize<List<SaleError>>(errorsJson) ?? [],
+                    CreatedAt = reader.GetDateTime("created_at")
+                });
+            }
+
+            return results;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     private static async Task EnsureSchemaAsync(MySqlConnection connection, CancellationToken cancellationToken)
     {
         string[] statements =
@@ -337,6 +440,27 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                 source VARCHAR(32) NOT NULL DEFAULT 'thingsboard',
                 updated_at DATETIME(6) NOT NULL,
                 bus_no VARCHAR(64) NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS investigation_findings (
+                id CHAR(36) NOT NULL PRIMARY KEY,
+                transaction_id VARCHAR(64) NULL,
+                rrn VARCHAR(64) NULL,
+                amount DECIMAL(12,4) NULL,
+                transaction_date DATETIME(6) NULL,
+                service_account_id VARCHAR(64) NULL,
+                mobility VARCHAR(16) NOT NULL,
+                product VARCHAR(255) NULL,
+                log_file_name VARCHAR(255) NULL,
+                log_day VARCHAR(16) NULL,
+                line_start INT NULL,
+                line_end INT NULL,
+                line_count INT NOT NULL DEFAULT 0,
+                error_count INT NOT NULL DEFAULT 0,
+                verdict VARCHAR(32) NOT NULL,
+                errors_json JSON NULL,
+                created_at DATETIME(6) NOT NULL
             )
             """
         ];

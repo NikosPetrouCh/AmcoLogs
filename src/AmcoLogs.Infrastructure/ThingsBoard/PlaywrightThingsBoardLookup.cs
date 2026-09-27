@@ -13,15 +13,17 @@ public sealed class PlaywrightThingsBoardLookup : IThingsBoardLookup
     private const string VehicleDashboardUrl = BaseUrl + "/dashboards/1de10db0-484f-11f0-a9dc-b357dadcba2d?state=W3siaWQiOiJkZWZhdWx0IiwicGFyYW1zIjp7fX0seyJpZCI6ImFsbF92ZWhpY2xlcyIsInBhcmFtcyI6e319XQ%253D%253D";
 
     private readonly IAmcoLogsStore _store;
+    private readonly ThingsBoardSettings _settings;
     private readonly object _gate = new();
     private readonly List<string> _log = [];
     private readonly List<ThingsBoardLookupResult> _results = [];
     private bool _running;
     private string _phase = "Idle";
 
-    public PlaywrightThingsBoardLookup(IAmcoLogsStore store)
+    public PlaywrightThingsBoardLookup(IAmcoLogsStore store, ThingsBoardSettings settings)
     {
         _store = store;
+        _settings = settings;
     }
 
     public ThingsBoardJobStatus GetStatus()
@@ -61,7 +63,7 @@ public sealed class PlaywrightThingsBoardLookup : IThingsBoardLookup
     {
         try
         {
-            Log("Opening ThingsBoard in a browser window. Log in there if asked — same as on the company laptop.");
+            Log("Opening ThingsBoard and signing in.");
             SetPhase("Login");
 
             var profile = Path.Combine(
@@ -163,20 +165,141 @@ public sealed class PlaywrightThingsBoardLookup : IThingsBoardLookup
 
     private async Task WaitForLoginIfNeededAsync(IPage page)
     {
+        if (!page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+        {
+            await page.WaitForTimeoutAsync(800);
+            return;
+        }
+
+        try
+        {
+            await page.WaitForSelectorAsync(
+                "input[type='password'], input[formcontrolname='password'], input[name='password']",
+                new PageWaitForSelectorOptions { Timeout = 20_000 });
+        }
+        catch
+        {
+            Log("Login form did not appear immediately.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.Username) && !string.IsNullOrWhiteSpace(_settings.Password))
+        {
+            Log("Filling ThingsBoard username and password.");
+            await FillLoginFormAsync(page);
+        }
+        else
+        {
+            Log("Waiting for you to sign in on the ThingsBoard window…");
+        }
+
         var deadline = DateTime.UtcNow.AddMinutes(8);
+        var lastPrompt = DateTime.MinValue;
         while (DateTime.UtcNow < deadline)
         {
             if (!page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
             {
+                Log("Signed in. Skipping Home and the dashboards list.");
                 await page.WaitForTimeoutAsync(1500);
                 return;
             }
 
-            Log("Waiting for you to sign in on the ThingsBoard window…");
-            await page.WaitForTimeoutAsync(3000);
+            if (DateTime.UtcNow - lastPrompt > TimeSpan.FromSeconds(8))
+            {
+                var pageText = "";
+                try
+                {
+                    pageText = await page.InnerTextAsync("body");
+                }
+                catch
+                {
+                    // Page may be navigating.
+                }
+
+                if (pageText.Contains("Invalid username or password", StringComparison.OrdinalIgnoreCase)
+                    || pageText.Contains("Authentication failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("ThingsBoard rejected the username or password.");
+                }
+
+                Log("Still on the login page…");
+                lastPrompt = DateTime.UtcNow;
+            }
+
+            await page.WaitForTimeoutAsync(1000);
         }
 
-        throw new TimeoutException("Still on the login page. Sign in in the opened window and run lookup again.");
+        throw new TimeoutException("Still on the login page. Check the ThingsBoard username and password.");
+    }
+
+    private async Task FillLoginFormAsync(IPage page)
+    {
+        var userBox = await FirstVisibleAsync(page,
+            "input[formcontrolname='username']",
+            "input[name='username']",
+            "input#username-input",
+            "input[type='email']",
+            "input[placeholder*='mail' i]");
+        var passBox = await FirstVisibleAsync(page,
+            "input[formcontrolname='password']",
+            "input[name='password']",
+            "input#password-input",
+            "input[type='password']");
+
+        if (userBox is null || passBox is null)
+        {
+            Log("Login fields were not found yet. Retrying…");
+            await page.WaitForTimeoutAsync(2000);
+            userBox ??= await FirstVisibleAsync(page, "input[type='email']", "input[formcontrolname='username']", "input[name='username']");
+            passBox ??= await FirstVisibleAsync(page, "input[type='password']", "input[formcontrolname='password']");
+        }
+
+        if (userBox is null || passBox is null)
+        {
+            Log("Could not find the ThingsBoard login form.");
+            return;
+        }
+
+        await userBox.ClickAsync();
+        await userBox.FillAsync(_settings.Username!);
+        await passBox.ClickAsync();
+        await passBox.FillAsync(_settings.Password!);
+
+        var submit = await FirstVisibleAsync(page,
+            "button[type='submit']",
+            "button:has-text('Log in')",
+            "button:has-text('Login')",
+            "button:has-text('Sign in')");
+        if (submit is not null)
+        {
+            await submit.ClickAsync();
+        }
+        else
+        {
+            await passBox.PressAsync("Enter");
+        }
+    }
+
+    private static async Task<ILocator?> FirstVisibleAsync(IPage page, params string[] selectors)
+    {
+        foreach (var selector in selectors)
+        {
+            var locator = page.Locator(selector).First;
+            try
+            {
+                if (await locator.CountAsync() == 0 || !await locator.IsVisibleAsync())
+                {
+                    continue;
+                }
+
+                return locator;
+            }
+            catch
+            {
+                // Selector not applicable on this screen.
+            }
+        }
+
+        return null;
     }
 
     private async Task<ThingsBoardLookupResult> LookupOneAsync(IPage page, string? token, ThingsBoardDeviceRequest device)

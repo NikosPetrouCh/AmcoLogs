@@ -1,4 +1,5 @@
 using AmcoLogs.Core.Excel;
+using AmcoLogs.Core.Logs;
 
 namespace AmcoLogs.Core.Persistence;
 
@@ -11,4 +12,6 @@ public interface IAmcoLogsStore
     Task<IReadOnlyList<DeviceIpMapping>> ListDeviceIpsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<StoredExcelRow>> ListAllExcelRowsAsync(int take = 2000, CancellationToken cancellationToken = default);
     Task UpsertDeviceIpAsync(DeviceIpMapping mapping, CancellationToken cancellationToken = default);
+    Task SaveFindingsAsync(IReadOnlyList<InvestigationFinding> findings, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InvestigationFinding>> ListFindingsAsync(int take = 500, CancellationToken cancellationToken = default);
 }

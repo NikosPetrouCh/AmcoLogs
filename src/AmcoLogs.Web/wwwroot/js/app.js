@@ -18,23 +18,30 @@ const stepThingsboard = document.querySelector("#step-thingsboard");
 const stepDownload = document.querySelector("#step-download");
 const tbBody = document.querySelector("#tb-body");
 const dlBody = document.querySelector("#dl-body");
+const prBody = document.querySelector("#pr-body");
+const stepProcess = document.querySelector("#step-process");
 
 const KNOWN_RESULTS = ["01", "02", "03", "04"];
 const STEP_COPY = {
   1: {
-    kicker: "Βήμα 1 από 3",
+    kicker: "Βήμα 1 από 4",
     title: "Εισαγωγή Excel",
-    lede: "Άσε το Excel. Διάλεξε κατηγορία 01–04 και συνέχισε με τις ίδιες συσκευές."
+    lede: "Άσε το Excel. Η εφαρμογή κρατά Transaction ID, RRN, Amount, TransactionDate και αν η συσκευή είναι κινητή (ξεκινά από 4) ή σταθερή (ξεκινά από 36)."
   },
   2: {
-    kicker: "Βήμα 2 από 3",
-    title: "ThingsBoard",
-    lede: "Ανοίγει browser στο laptop. Κάνε login όπως πάντα. Η εφαρμογή πάει κατευθείαν στα δύο dashboards: ServiceAccountID → BUS no → WAN IP."
+    kicker: "Βήμα 2 από 4",
+    title: "Εύρεση IP",
+    lede: "Πρώτα ThingsBoard. Αν δεν βρει IP, γράψε την χειροκίνητα στο πεδίο της συσκευής και συνέχισε."
   },
   3: {
-    kicker: "Βήμα 3 από 3",
-    title: "Κατέβασμα logs",
-    lede: "Σταθερά (36…) κατεβαίνουν απευθείας. Κινητά (4…) χρειάζονται ping και zip."
+    kicker: "Βήμα 3 από 4",
+    title: "Logs",
+    lede: "WinSCP: σταθερά κατεβάζει το nlog της ημέρας, κινητά κάνουν ping, zip και μετά get. Αν δεν βρεθεί το αρχείο, άσε το log μόνος σου στη συσκευή."
+  },
+  4: {
+    kicker: "Βήμα 4 από 4",
+    title: "Πόρισμα",
+    lede: "Ψάχνει μόνο τη συναλλαγή του Excel: Selecting product + Transaction ID, μόνο κάρτα, και μαζεύει ERROR σε αυτό το παράθυρο."
   }
 };
 
@@ -42,17 +49,17 @@ const DB_COPY = {
   errors: {
     kicker: "Database",
     title: "Error reports",
-    lede: "Imported transactions grouped by EticketTransactionResult."
+    lede: "Πορίσματα ανά Transaction ID: ERROR μέσα στο παράθυρο της συναλλαγής του Excel."
   },
   ips: {
     kicker: "Database",
     title: "CTVM IPs",
-    lede: "Cached ServiceAccountID to IP mappings from ThingsBoard."
+    lede: "ServiceAccountID → IP από ThingsBoard ή χειροκίνητη καταχώρηση."
   },
-  excel: {
+  general: {
     kicker: "Database",
-    title: "Excel archive",
-    lede: "Every imported Excel field, including extra columns."
+    title: "General",
+    lede: "Τα στοιχεία της συναλλαγής από το Excel: Transaction ID, RRN, Amount, ημερομηνία, κινητή/σταθερή."
   }
 };
 
@@ -63,6 +70,7 @@ let selectedResult = null;
 let fileName = "";
 let devices = [];
 let reachedThingsboard = false;
+let lastFindings = [];
 
 browse.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => {
@@ -169,6 +177,7 @@ function renderImport(payload) {
   currentStep = 1;
   currentView = "flow";
   reachedThingsboard = false;
+  lastFindings = [];
 
   const savedNote = payload.saved
     ? `Αποθηκεύτηκαν ${payload.saved.rowCount} γραμμές στη MySQL.`
@@ -218,9 +227,9 @@ function renderSelection() {
   selection.hidden = false;
   selection.innerHTML = `
     <h2>Κατηγορία ${escapeHtml(selectedResult)}</h2>
-    <p>${countLabel(rows.length, "συναλλαγή", "συναλλαγές")} από ${countLabel(devices.length, "συσκευή", "συσκευές")} θα περάσουν στο ThingsBoard.</p>
+    <p>${countLabel(rows.length, "συναλλαγή", "συναλλαγές")} από ${countLabel(devices.length, "συσκευή", "συσκευές")}. Αποθηκεύονται Transaction ID, RRN, Amount, ημερομηνία και τύπος συσκευής.</p>
     <div class="actions">
-      <button type="button" class="primary" id="to-thingsboard" onclick="goToStep(2)">Συνέχεια στο ThingsBoard</button>
+      <button type="button" class="primary" id="to-thingsboard" onclick="goToStep(2)">Συνέχεια στις IPs</button>
     </div>
     <details>
       <summary>Προβολή γραμμών</summary>
@@ -245,6 +254,9 @@ async function goToStep(step) {
   if (step === 3 && !reachedThingsboard) {
     return;
   }
+  if (step === 4 && !hasAnyLog()) {
+    return;
+  }
   if (step >= 2) {
     await mergeCachedIps();
     reachedThingsboard = true;
@@ -267,6 +279,7 @@ function renderApp() {
     stepExcel.hidden = true;
     stepThingsboard.hidden = true;
     stepDownload.hidden = true;
+    stepProcess.hidden = true;
     dbView.hidden = false;
     renderPipeline();
     renderDatabase();
@@ -281,12 +294,16 @@ function renderApp() {
   stepExcel.hidden = currentStep !== 1;
   stepThingsboard.hidden = currentStep !== 2;
   stepDownload.hidden = currentStep !== 3;
+  stepProcess.hidden = currentStep !== 4;
   renderPipeline();
   if (currentStep === 2) {
     renderThingsboard();
   }
   if (currentStep === 3) {
     renderDownload();
+  }
+  if (currentStep === 4) {
+    renderProcess();
   }
 }
 
@@ -297,7 +314,8 @@ function renderPipeline() {
     item.classList.toggle("done", currentView === "flow" && step < currentStep);
     const button = item.querySelector(".pipeline-btn");
     const locked = (step === 2 && (!selectedResult || devices.length === 0))
-      || (step === 3 && !reachedThingsboard);
+      || (step === 3 && !reachedThingsboard)
+      || (step === 4 && !hasAnyLog());
     button.disabled = locked;
   });
 }
@@ -312,44 +330,50 @@ async function renderDatabase() {
     await renderErrorReports();
   } else if (currentView === "ips") {
     await renderCtvmIps();
-  } else if (currentView === "excel") {
+  } else if (currentView === "general") {
     await renderExcelArchive();
   }
 }
 
 async function renderErrorReports() {
-  const rows = await fetchJson("/api/imports/rows");
-  const groups = new Map();
-  for (const row of rows) {
-    const code = normalizeResult(row.eticketTransactionResult);
-    const current = groups.get(code) || [];
-    current.push(row);
-    groups.set(code, current);
-  }
-  const codes = [...KNOWN_RESULTS, ...[...groups.keys()].filter((code) => !KNOWN_RESULTS.includes(code)).sort()];
+  const stored = lastFindings.length ? lastFindings : await fetchJson("/api/logs/findings");
   dbBody.innerHTML = `
     <h2>Error reports</h2>
-    <p class="hint">${rows.length ? `${rows.length} stored transactions.` : "No stored Excel data yet. Connect MySQL and import a file."}</p>
-    ${codes.map((code) => {
-      const items = groups.get(code) || [];
-      return `
-        <details ${items.length ? "" : "hidden"}>
-          <summary>${escapeHtml(code)} · ${items.length}</summary>
-          ${renderTable(
-            ["File", "ServiceAccountID", "RRN", "Amount", "TransactionID", "Date"],
-            items.map((row) => [
-              row.fileName,
-              row.serviceAccountId || "",
-              row.rrn || "",
-              row.amount ?? "",
-              row.transactionId || "",
-              formatDate(row.transactionDate)
-            ])
-          )}
-        </details>
-      `;
-    }).join("")}
+    <p class="hint">${stored.length ? `${stored.length} πορίσματα.` : "Δεν υπάρχουν ακόμα πορίσματα. Τρέξε το βήμα 4 στο flow."}</p>
+    ${stored.length ? renderFindings(stored) : ""}
   `;
+}
+
+function renderFindings(findings) {
+  return findings.map((item) => `
+    <details ${item.verdict === "LocatedWithErrors" ? "open" : ""}>
+      <summary class="mono">${escapeHtml(verdictLabel(item.verdict))} · ${escapeHtml(item.transactionId || "—")} · ${escapeHtml(item.serviceAccountId || "")} · ${item.errorCount || 0} ERROR</summary>
+      <p class="hint">${escapeHtml(item.product || "")} · ${escapeHtml(item.rrn || "")} · ${item.amount ?? ""} · ${formatDate(item.transactionDate)} · ${escapeHtml(item.logFileName || "χωρίς log")}${item.lineStart ? ` · γραμμές ${item.lineStart}–${item.lineEnd}` : ""}</p>
+      ${item.errors?.length ? renderTable(
+        ["Line", "Time", "Logger", "Message"],
+        item.errors.map((error) => [error.lineNumber, error.time, error.logger, error.message])
+      ) : `<p class="hint">${hintForVerdict(item.verdict)}</p>`}
+    </details>
+  `).join("");
+}
+
+function verdictLabel(value) {
+  if (value === "LocatedWithErrors") return "ERROR στη συναλλαγή";
+  if (value === "LocatedNoErrors") return "Εντοπίστηκε, χωρίς ERROR";
+  if (value === "NotFoundInLog") return "Δεν βρέθηκε στο log";
+  return "Χωρίς log";
+}
+
+function hintForVerdict(value) {
+  if (value === "LocatedNoErrors") return "Η card συναλλαγή του Excel βρέθηκε. Δεν υπάρχουν ERROR σε αυτό το παράθυρο.";
+  if (value === "NotFoundInLog") return "Το Transaction ID του Excel δεν βρέθηκε ως card πώληση σε αυτό το log.";
+  return "Δεν υπάρχει nlog για αυτή τη συσκευή / ημέρα.";
+}
+
+function verdictClass(value) {
+  if (value === "LocatedWithErrors") return "verdict-bad";
+  if (value === "LocatedNoErrors") return "verdict-ok";
+  return "verdict-miss";
 }
 
 async function renderCtvmIps() {
@@ -373,8 +397,8 @@ async function renderCtvmIps() {
 async function renderExcelArchive() {
   const rows = await fetchJson("/api/imports/rows");
   dbBody.innerHTML = `
-    <h2>Excel archive</h2>
-    <p class="hint">${rows.length ? `${rows.length} rows with all imported fields.` : "No Excel archive yet."}</p>
+    <h2>General</h2>
+    <p class="hint">${rows.length ? `${rows.length} συναλλαγές από Excel.` : "Δεν υπάρχει ακόμα αρχείο Excel."}</p>
     ${renderTable(
       ["File", "ServiceAccountID", "RRN", "Amount", "EticketTransactionResult", "TransactionID", "TransactionDate", "Type", "Extra"],
       rows.map((row) => [
@@ -407,29 +431,30 @@ async function fetchJson(url) {
 function renderThingsboard() {
   tbBody.innerHTML = `
     <h2>Συσκευές από κατηγορία ${escapeHtml(selectedResult)}</h2>
-    <p class="hint">Δεν μπαίνει στο Home ούτε στη λίστα Dashboards. Ανοίγει το dashboard συσκευών, βρίσκει BUS no, μετά το dashboard οχημάτων για WAN IP. Αν εμφανιστεί login, μπες όπως στο εταιρικό laptop.</p>
+    <p class="hint">Αναζήτηση IP στο ThingsBoard. Αν αποτύχει, γράψε την IP στο πεδίο και αποθηκεύεται ως χειροκίνητη. Δεν χρειάζεται να περιμένεις επιτυχές lookup για να συνεχίσεις.</p>
     <div class="device-list" id="tb-devices">
       ${renderDeviceRows()}
     </div>
     <pre id="tb-log" class="tb-log"></pre>
     <div class="actions">
       <button type="button" onclick="goToStep(1)">Πίσω στο Excel</button>
-      <button type="button" class="primary" id="tb-lookup" onclick="startThingsBoardLookup()">Αναζήτηση IP</button>
-      <button type="button" class="primary" onclick="goToStep(3)">Συνέχεια στο κατέβασμα</button>
+      <button type="button" class="primary" id="tb-lookup" onclick="startThingsBoardLookup()">Αναζήτηση στο ThingsBoard</button>
+      <button type="button" class="primary" onclick="goToStep(3)">Συνέχεια στα logs</button>
     </div>
   `;
 }
 
 function renderDeviceRows() {
   return `
-    <div class="device-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
-      <span>ServiceAccountID</span><span>Type</span><span>IP / BUS</span>
+    <div class="device-row tb-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
+      <span>ServiceAccountID</span><span>Τύπος</span><span>IP (ThingsBoard ή χειροκίνητα)</span><span>BUS</span>
     </div>
     ${devices.map((device) => `
-      <div class="device-row">
+      <div class="device-row tb-row">
         <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
         <span>${mobilityLabel(device.mobility)}</span>
-        <span class="mono">${escapeHtml(device.ip || "pending")}${device.busNo ? " · " + escapeHtml(device.busNo) : ""}</span>
+        <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="π.χ. 10.0.0.12" onchange="saveDeviceIp(this)">
+        <span class="mono">${escapeHtml(device.busNo || "—")}</span>
       </div>
     `).join("")}
   `;
@@ -494,20 +519,24 @@ async function pollThingsBoard() {
 }
 
 function applyThingsBoardStatus(status) {
+  let changed = false;
   for (const result of status.results || []) {
     const device = devices.find((item) => item.serviceAccountId === result.serviceAccountId);
     if (!device) {
       continue;
     }
-    if (result.ipAddress) {
+    if (result.ipAddress && device.ip !== result.ipAddress) {
       device.ip = result.ipAddress;
+      changed = true;
     }
-    if (result.busNo) {
+    if (result.busNo && device.busNo !== result.busNo) {
       device.busNo = result.busNo;
+      changed = true;
     }
   }
   const list = document.querySelector("#tb-devices");
-  if (list) {
+  const typing = document.activeElement?.classList?.contains("ip-edit");
+  if (list && changed && !typing) {
     list.innerHTML = renderDeviceRows();
   }
   setTbLog((status.log || []).join("\n"));
@@ -528,11 +557,11 @@ function renderDownload() {
   const ready = devices.filter((device) => device.ip).length;
 
   dlBody.innerHTML = `
-    <h2>Κατέβασμα για κατηγορία ${escapeHtml(selectedResult)}</h2>
-    <p class="hint">${ready} από ${devices.length} συσκευές έχουν IP. Το πραγματικό WinSCP / ping θα μπει αφού δέσουμε το ThingsBoard.</p>
+    <h2>Logs για κατηγορία ${escapeHtml(selectedResult)}</h2>
+    <p class="hint">${ready} από ${devices.length} έχουν IP. Κινητά: ping → zip nlog-all-ΗΜΕΡΟΜΗΝΙΑ.zip → WinSCP get. Σταθερά: get το .log της ημέρας. Αν το κατέβασμα αποτύχει, διάλεξε το nlog στη συσκευή.</p>
     <div class="split">
       <div>
-        <h3>Σταθερά · WinSCP</h3>
+        <h3>Σταθερά · SFTP</h3>
         ${deviceMiniList(fixed)}
       </div>
       <div>
@@ -541,14 +570,13 @@ function renderDownload() {
       </div>
     </div>
     ${other.length ? `<p class="hint">Άγνωστος τύπος: ${other.map((device) => device.serviceAccountId).join(", ")}</p>` : ""}
+    <pre id="dl-log" class="tb-log"></pre>
     <div class="actions">
-      <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στο ThingsBoard</button>
-      <button type="button" class="primary" id="start-download" ${ready ? "" : "disabled"}>Κατέβασμα logs</button>
+      <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>
+      <button type="button" class="primary" id="start-download" onclick="startLogDownload()">Κατέβασμα με WinSCP</button>
+      <button type="button" class="primary" id="to-process" ${hasAnyLog() ? "" : "disabled"} onclick="goToStep(4)">Συνέχεια στο πόρισμα</button>
     </div>
   `;
-  dlBody.querySelector("#start-download").addEventListener("click", () => {
-    setStatus("Το κατέβασμα θα ενεργοποιηθεί όταν υπάρχουν IP από το ThingsBoard.", true);
-  });
 }
 
 function deviceMiniList(list) {
@@ -556,31 +584,281 @@ function deviceMiniList(list) {
     return `<p class="hint">Καμία συσκευή σε αυτή την ομάδα.</p>`;
   }
   return `<div class="device-list">${list.map((device) => `
-    <div class="device-row">
+    <div class="device-row dl-row">
       <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
-      <span>${device.transactions}</span>
-      <span class="mono">${escapeHtml(device.ip || "χωρίς IP")}</span>
+      <span>${mobilityLabel(device.mobility)} · ${(device.logDates || []).join(", ") || "χωρίς ημερομηνία"}</span>
+      <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="IP" onchange="saveDeviceIp(this)">
+      <label class="log-drop">Drop / επιλογή nlog
+        <input type="file" accept=".log,.zip,.txt" data-id="${escapeHtml(device.serviceAccountId)}" onchange="uploadManualLog(this)">
+      </label>
+      <span class="mono dl-status">${escapeHtml(device.downloadStatus || "—")}</span>
     </div>
   `).join("")}</div>`;
 }
 
+async function saveDeviceIp(input) {
+  const id = input.dataset.id;
+  const ip = input.value.trim();
+  const device = devices.find((item) => item.serviceAccountId === id);
+  if (!device) {
+    return;
+  }
+  device.ip = ip || null;
+  if (!ip) {
+    return;
+  }
+  const response = await fetch("/api/devices/ip", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      serviceAccountId: device.serviceAccountId,
+      ipAddress: ip,
+      mobility: device.mobility
+    })
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    setDlLog(payload.message || "Invalid IP.");
+  }
+}
+
+async function startLogDownload() {
+  const target = devices.filter((device) => device.ip);
+  if (!target.length) {
+    setDlLog("Write at least one IP first.");
+    return;
+  }
+  const button = document.querySelector("#start-download");
+  if (button) {
+    button.disabled = true;
+  }
+  setDlLog("Starting ping / WinSCP…");
+  const response = await fetch("/api/logs/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      devices: target.map((device) => ({
+        serviceAccountId: device.serviceAccountId,
+        mobility: device.mobility,
+        ipAddress: device.ip,
+        logDates: device.logDates || []
+      }))
+    })
+  });
+  if (!response.ok && response.status !== 202) {
+    const payload = await response.json().catch(() => ({}));
+    setDlLog(payload.message || "Could not start download.");
+    if (button) {
+      button.disabled = false;
+    }
+    return;
+  }
+  pollLogDownload();
+}
+
+function pollLogDownload() {
+  if (window.__dlTimer) {
+    clearInterval(window.__dlTimer);
+  }
+  const tick = async () => {
+    try {
+      const response = await fetch("/api/logs/status");
+      if (!response.ok) {
+        return;
+      }
+      const status = await response.json();
+      applyDownloadStatus(status);
+      if (!status.running) {
+        clearInterval(window.__dlTimer);
+        const button = document.querySelector("#start-download");
+        if (button) {
+          button.disabled = false;
+        }
+      }
+    } catch {
+      // Keep polling.
+    }
+  };
+  tick();
+  window.__dlTimer = setInterval(tick, 1500);
+}
+
+function applyDownloadStatus(status) {
+  for (const result of status.results || []) {
+    const device = devices.find((item) => item.serviceAccountId === result.serviceAccountId);
+    if (!device) {
+      continue;
+    }
+    device.downloadStatus = result.message || result.status;
+    if (result.localPath) {
+      device.localPath = result.localPath;
+    }
+  }
+  document.querySelectorAll(".dl-row").forEach((row) => {
+    const id = row.querySelector(".ip-edit")?.dataset.id;
+    const device = devices.find((item) => item.serviceAccountId === id);
+    const cell = row.querySelector(".dl-status");
+    if (device && cell) {
+      cell.textContent = device.downloadStatus || "—";
+    }
+  });
+  setDlLog((status.log || []).join("\n"));
+  if (!status.running) {
+    renderPipeline();
+    const next = document.querySelector("#to-process");
+    if (next && hasAnyLog()) {
+      next.disabled = false;
+    }
+  }
+}
+
+function setDlLog(text) {
+  const log = document.querySelector("#dl-log");
+  if (log) {
+    log.textContent = text;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+async function uploadManualLog(input) {
+  const file = input.files?.[0];
+  const id = input.dataset.id;
+  if (!file || !id) {
+    return;
+  }
+  const body = new FormData();
+  body.append("file", file);
+  body.append("serviceAccountId", id);
+  setDlLog("Αποθήκευση " + file.name + " για " + id + "…");
+  const response = await fetch("/api/logs/upload", { method: "POST", body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    setDlLog(payload.message || "Το αρχείο δεν ανέβηκε.");
+    return;
+  }
+  const device = devices.find((item) => item.serviceAccountId === id);
+  if (device) {
+    device.localPath = payload.localPath;
+    device.downloadStatus = "χειροκίνητα · " + payload.fileName;
+  }
+  setDlLog("Το " + payload.fileName + " μπήκε χειροκίνητα για " + id + ".");
+  renderDownload();
+  renderPipeline();
+}
+
+function renderProcess() {
+  const rows = rowsFor(selectedResult);
+  const logs = devices.filter((device) => device.localPath);
+  prBody.innerHTML = `
+    <h2>Πόρισμα κατηγορίας ${escapeHtml(selectedResult)}</h2>
+    <p class="hint">${countLabel(rows.length, "συναλλαγή", "συναλλαγές")} από το Excel · ${countLabel(logs.length, "log", "logs")}. Ψάχνει μόνο αυτά τα Transaction ID, μόνο κάρτα.</p>
+    ${renderTable(
+      ["ServiceAccountID", "TransactionID", "RRN", "Amount", "Ημερομηνία", "Τύπος"],
+      rows.map((row) => [
+        row.immediate.serviceAccountId || "",
+        row.immediate.transactionId || "",
+        row.immediate.rrn || "",
+        row.immediate.amount ?? "",
+        formatDate(row.immediate.transactionDate),
+        mobilityLabel(row.mobility)
+      ])
+    )}
+    <p class="hint" style="margin-top:16px;">Logs: ${logs.map((device) => device.serviceAccountId + " → " + (device.downloadStatus || device.localPath)).join(" · ") || "κανένα"}</p>
+    <pre id="pr-log" class="tb-log">${lastFindings.length ? "" : "Πάτα επεξεργασία για να βγει το πόρισμα."}</pre>
+    <div id="pr-results">${lastFindings.length ? renderFindings(lastFindings) : ""}</div>
+    <div class="actions">
+      <button type="button" onclick="goToStep(3)">Πίσω στα logs</button>
+      <button type="button" class="primary" id="run-process" onclick="runProcess()">Επεξεργασία και αποθήκευση</button>
+    </div>
+  `;
+}
+
+async function runProcess() {
+  const button = document.querySelector("#run-process");
+  const log = document.querySelector("#pr-log");
+  if (button) {
+    button.disabled = true;
+  }
+  if (log) {
+    log.textContent = "Εντοπισμός συναλλαγών του Excel μέσα στα nlog…";
+  }
+  const response = await fetch("/api/logs/process", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      transactions: rowsFor(selectedResult).map((row) => ({
+        transactionId: row.immediate.transactionId,
+        rrn: row.immediate.rrn,
+        amount: row.immediate.amount,
+        transactionDate: row.immediate.transactionDate,
+        serviceAccountId: row.immediate.serviceAccountId,
+        mobility: row.mobility
+      })),
+      logs: devices.filter((device) => device.localPath).map((device) => ({
+        serviceAccountId: device.serviceAccountId,
+        path: device.localPath
+      }))
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (button) {
+    button.disabled = false;
+  }
+  if (!response.ok) {
+    if (log) {
+      log.textContent = payload.message || "Η επεξεργασία απέτυχε.";
+    }
+    return;
+  }
+  lastFindings = payload.findings || [];
+  if (log) {
+    log.textContent = [
+      `Συναλλαγές Excel: ${payload.subjectCount}`,
+      `Αρχεία log: ${payload.logFileCount}`,
+      `Εντοπίστηκαν: ${payload.locatedCount}`,
+      `Με ERROR: ${payload.errorSaleCount}`,
+      `Δεν βρέθηκαν στο log: ${payload.notFoundCount}`,
+      `Χωρίς log: ${payload.missingLogCount}`,
+      payload.persisted ? "Αποθηκεύτηκαν στη MySQL (Error reports, CTVM IPs, General)." : (payload.persistMessage || "")
+    ].filter(Boolean).join("\n");
+  }
+  const results = document.querySelector("#pr-results");
+  if (results) {
+    results.innerHTML = renderFindings(lastFindings);
+  }
+}
+
 function refreshDevices() {
+  const previous = new Map(devices.map((device) => [device.serviceAccountId, device]));
   const map = new Map();
   for (const row of rowsFor(selectedResult)) {
     const id = row.immediate.serviceAccountId;
     if (!id) {
       continue;
     }
+    const prior = previous.get(id);
     const current = map.get(id) || {
       serviceAccountId: id,
       mobility: row.mobility,
       transactions: 0,
-      ip: null
+      ip: prior?.ip || null,
+      busNo: prior?.busNo || null,
+      localPath: prior?.localPath || null,
+      downloadStatus: prior?.downloadStatus || null,
+      logDates: []
     };
     current.transactions += 1;
+    const day = dayFromTransaction(row.immediate.transactionDate);
+    if (day && !current.logDates.includes(day)) {
+      current.logDates.push(day);
+    }
     map.set(id, current);
   }
   devices = [...map.values()];
+}
+
+function hasAnyLog() {
+  return devices.some((device) => device.localPath);
 }
 
 async function mergeCachedIps() {
@@ -669,6 +947,13 @@ function renderTable(headers, rows) {
   `;
 }
 
+function dayFromTransaction(value) {
+  if (!value) {
+    return null;
+  }
+  return String(value).slice(0, 10);
+}
+
 function formatDate(value) {
   if (!value) return "";
   return new Date(value).toLocaleString("el-GR");
@@ -698,6 +983,10 @@ function renderDbStatus(status) {
 async function loadStatus() {
   const response = await fetch("/api/database/status");
   renderDbStatus(await response.json());
+}
+
+function uniqueIds(values) {
+  return [...new Set((values || []).filter(Boolean).map((id) => String(id).trim()).filter(Boolean))];
 }
 
 function escapeHtml(value) {

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/app.css?v=6">
+  <link rel="stylesheet" href="/css/app.css?v=9">
 </head>
 <body>
   <div class="app">
@@ -26,7 +26,7 @@
             <span class="step">1</span>
             <div>
               <strong>Excel</strong>
-              <small>EticketTransactionResult</small>
+              <small>Transaction ID · RRN · ημερομηνία</small>
             </div>
           </button>
         </li>
@@ -34,8 +34,8 @@
           <button type="button" class="pipeline-btn" data-step="2">
             <span class="step">2</span>
             <div>
-              <strong>ThingsBoard</strong>
-              <small>ServiceAccountID → IP</small>
+              <strong>IPs</strong>
+              <small>ThingsBoard ή χειροκίνητα</small>
             </div>
           </button>
         </li>
@@ -43,8 +43,17 @@
           <button type="button" class="pipeline-btn" data-step="3">
             <span class="step">3</span>
             <div>
-              <strong>Download logs</strong>
-              <small>Fixed / mobile</small>
+              <strong>Logs</strong>
+              <small>WinSCP ή drop αρχείου</small>
+            </div>
+          </button>
+        </li>
+        <li data-step="4">
+          <button type="button" class="pipeline-btn" data-step="4">
+            <span class="step">4</span>
+            <div>
+              <strong>Πόρισμα</strong>
+              <small>Μόνο η συναλλαγή του Excel</small>
             </div>
           </button>
         </li>
@@ -54,7 +63,7 @@
         <p class="db-nav-title">Database</p>
         <button type="button" class="db-link" data-db="errors">Error reports</button>
         <button type="button" class="db-link" data-db="ips">CTVM IPs</button>
-        <button type="button" class="db-link" data-db="excel">Excel archive</button>
+        <button type="button" class="db-link" data-db="general">General</button>
         <p id="db-dot" class="db-dot">MySQL offline</p>
       </nav>
     </aside>
@@ -62,9 +71,9 @@
     <main class="stage">
       <header class="stage-head">
         <div>
-          <p id="kicker" class="kicker">Βήμα 1 από 3</p>
+          <p id="kicker" class="kicker">Βήμα 1 από 4</p>
           <h1 id="stage-title">Εισαγωγή Excel</h1>
-          <p id="stage-lede" class="lede">Άσε το Excel. Διάλεξε κατηγορία 01–04 και συνέχισε στα επόμενα βήματα με τις ίδιες συσκευές.</p>
+          <p id="stage-lede" class="lede">Άσε το Excel. Η εφαρμογή κρατά Transaction ID, RRN, Amount, TransactionDate και αν η συσκευή είναι κινητή ή σταθερή.</p>
         </div>
       </header>
 
@@ -88,6 +97,10 @@
         <section id="dl-body" class="panel-block"></section>
       </section>
 
+      <section id="step-process" hidden>
+        <section id="pr-body" class="panel-block"></section>
+      </section>
+
       <section id="db-view" hidden>
         <section class="panel-block db-connect">
           <p id="db-status" class="db-status pending">Checking MySQL…</p>
@@ -107,6 +120,6 @@
       </section>
     </main>
   </div>
-  <script src="/js/app.js?v=7"></script>
+  <script src="/js/app.js?v=13"></script>
 </body>
 </html>
