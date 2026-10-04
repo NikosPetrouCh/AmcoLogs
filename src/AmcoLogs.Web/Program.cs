@@ -1,12 +1,12 @@
 using System.Text.Json.Serialization;
+using AmcoLogs.Core.Device;
 using AmcoLogs.Core.Excel;
 using AmcoLogs.Core.Logs;
 using AmcoLogs.Core.Persistence;
-using AmcoLogs.Core.ThingsBoard;
+using AmcoLogs.Infrastructure.Device;
 using AmcoLogs.Infrastructure.Excel;
 using AmcoLogs.Infrastructure.Logs;
 using AmcoLogs.Infrastructure.Persistence;
-using AmcoLogs.Infrastructure.ThingsBoard;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
@@ -18,20 +18,15 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 builder.Services.AddSingleton<LocalConnectionStore>();
 builder.Services.AddSingleton<IExcelImportParser, ClosedXmlExcelImportParser>();
 builder.Services.AddSingleton<IAmcoLogsStore, MySqlAmcoLogsStore>();
-builder.Services.AddSingleton(new ThingsBoardSettings
-{
-    Username = builder.Configuration["ThingsBoard:Username"],
-    Password = builder.Configuration["ThingsBoard:Password"]
-});
-builder.Services.AddSingleton<IThingsBoardLookup, PlaywrightThingsBoardLookup>();
+builder.Services.AddSingleton<IIpCatalog>(_ =>
+    new FileIpCatalog(Path.Combine(builder.Environment.ContentRootPath, "data")));
 builder.Services.AddSingleton(new DeviceAccessSettings
 {
-    Username = builder.Configuration["DeviceAccess:Username"],
+    Username = builder.Configuration["DeviceAccess:Username"] ?? "amco",
     Password = builder.Configuration["DeviceAccess:Password"],
-    Port = int.TryParse(builder.Configuration["DeviceAccess:Port"], out var port) ? port : 22,
+    Port = int.TryParse(builder.Configuration["DeviceAccess:Port"], out var port) ? port : 1030,
     RemoteLogPath = builder.Configuration["DeviceAccess:RemoteLogPath"] ?? "/opt/amco/middleware/TVMserver",
-    PingTimeoutMs = int.TryParse(builder.Configuration["DeviceAccess:PingTimeoutMs"], out var pingMs) ? pingMs : 2500,
-    WinScpPath = builder.Configuration["DeviceAccess:WinScpPath"]
+    LocalDownloadFolder = builder.Configuration["DeviceAccess:LocalDownloadFolder"]
 });
 builder.Services.AddSingleton<ILogDownloadJob, RemoteLogDownloader>();
 builder.Services.AddSingleton<INlogSaleLocator, NlogSaleLocator>();

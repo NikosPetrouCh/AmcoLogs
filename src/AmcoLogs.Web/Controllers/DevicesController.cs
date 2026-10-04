@@ -1,3 +1,4 @@
+using AmcoLogs.Core.Device;
 using AmcoLogs.Core.Persistence;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,16 +9,47 @@ namespace AmcoLogs.Web.Controllers;
 public sealed class DevicesController : ControllerBase
 {
     private readonly IAmcoLogsStore _store;
+    private readonly IIpCatalog _catalog;
 
-    public DevicesController(IAmcoLogsStore store)
+    public DevicesController(IAmcoLogsStore store, IIpCatalog catalog)
     {
         _store = store;
+        _catalog = catalog;
     }
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<DeviceIpMapping>>> List(CancellationToken cancellationToken)
     {
         return Ok(await _store.ListDeviceIpsAsync(cancellationToken));
+    }
+
+    [HttpPost("resolve")]
+    public async Task<ActionResult<IpResolveResult>> Resolve(
+        [FromBody] DeviceResolveRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = _catalog.Resolve(request.ServiceAccountIds ?? []);
+        foreach (var hit in result.Hits)
+        {
+            try
+            {
+                await _store.UpsertDeviceIpAsync(new DeviceIpMapping
+                {
+                    ServiceAccountId = hit.ServiceAccountId,
+                    IpAddress = hit.IpAddress,
+                    BusNo = hit.BusNo,
+                    Mobility = hit.Mobility,
+                    Source = hit.Source,
+                    UpdatedAt = DateTime.UtcNow
+                }, cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                break;
+            }
+        }
+
+        return Ok(result);
     }
 
     [HttpPost("ip")]
@@ -64,4 +96,9 @@ public sealed class DeviceIpUpdate
     public string ServiceAccountId { get; set; } = "";
     public string IpAddress { get; set; } = "";
     public string Mobility { get; set; } = "Unknown";
+}
+
+public sealed class DeviceResolveRequest
+{
+    public List<string>? ServiceAccountIds { get; set; }
 }

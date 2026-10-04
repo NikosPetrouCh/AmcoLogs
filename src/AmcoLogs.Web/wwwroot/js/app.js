@@ -31,12 +31,12 @@ const STEP_COPY = {
   2: {
     kicker: "Βήμα 2 από 4",
     title: "Εύρεση IP",
-    lede: "Πρώτα ThingsBoard. Αν δεν βρει IP, γράψε την χειροκίνητα στο πεδίο της συσκευής και συνέχισε."
+    lede: "Οι IP βγαίνουν από τα αρχεία Ips_TVM360.json και Ips_Mobile.json. Αν λείπει κάποια, γράψε την χειροκίνητα."
   },
   3: {
     kicker: "Βήμα 3 από 4",
     title: "Logs",
-    lede: "WinSCP: σταθερά κατεβάζει το nlog της ημέρας, κινητά κάνουν ping, zip και μετά get. Αν δεν βρεθεί το αρχείο, άσε το log μόνος σου στη συσκευή."
+    lede: "Κατέβασμα με scp -P 1030 amco@IP:/opt/amco/middleware/TVMserver/nlog-all-ΗΜΕΡΟΜΗΝΙΑ.log στο Desktop\\Nikos. Αν αποτύχει, άσε το log μόνος σου."
   },
   4: {
     kicker: "Βήμα 4 από 4",
@@ -54,7 +54,7 @@ const DB_COPY = {
   ips: {
     kicker: "Database",
     title: "CTVM IPs",
-    lede: "ServiceAccountID → IP από ThingsBoard ή χειροκίνητη καταχώρηση."
+    lede: "ServiceAccountID → IP από Ips_TVM360 / Ips_Mobile ή χειροκίνητη καταχώρηση."
   },
   general: {
     kicker: "Database",
@@ -380,7 +380,7 @@ async function renderCtvmIps() {
   const mappings = await fetchJson("/api/devices");
   dbBody.innerHTML = `
     <h2>CTVM IPs</h2>
-    <p class="hint">${mappings.length ? `${mappings.length} cached mappings.` : "No IPs stored yet. They will appear after ThingsBoard lookups."}</p>
+    <p class="hint">${mappings.length ? `${mappings.length} cached mappings.` : "Δεν υπάρχουν ακόμα IP. Θα μπουν από τα δύο JSON ή χειροκίνητα."}</p>
     ${renderTable(
       ["ServiceAccountID", "IP", "Type", "Source", "Updated"],
       mappings.map((item) => [
@@ -431,115 +431,76 @@ async function fetchJson(url) {
 function renderThingsboard() {
   tbBody.innerHTML = `
     <h2>Συσκευές από κατηγορία ${escapeHtml(selectedResult)}</h2>
-    <p class="hint">Αναζήτηση IP στο ThingsBoard. Αν αποτύχει, γράψε την IP στο πεδίο και αποθηκεύεται ως χειροκίνητη. Δεν χρειάζεται να περιμένεις επιτυχές lookup για να συνεχίσεις.</p>
+    <p class="hint">IP από Ips_TVM360.json (σταθερά) και Ips_Mobile.json (κινητά). Αν λείπει, γράψε την στο πεδίο.</p>
     <div class="device-list" id="tb-devices">
       ${renderDeviceRows()}
     </div>
     <pre id="tb-log" class="tb-log"></pre>
     <div class="actions">
       <button type="button" onclick="goToStep(1)">Πίσω στο Excel</button>
-      <button type="button" class="primary" id="tb-lookup" onclick="startThingsBoardLookup()">Αναζήτηση στο ThingsBoard</button>
+      <button type="button" class="primary" id="tb-lookup" onclick="resolveIpsFromFiles()">Φόρτωση IP από αρχεία</button>
       <button type="button" class="primary" onclick="goToStep(3)">Συνέχεια στα logs</button>
     </div>
   `;
+  resolveIpsFromFiles();
 }
 
 function renderDeviceRows() {
   return `
     <div class="device-row tb-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
-      <span>ServiceAccountID</span><span>Τύπος</span><span>IP (ThingsBoard ή χειροκίνητα)</span><span>BUS</span>
+      <span>ServiceAccountID</span><span>Τύπος</span><span>IP (αρχείο ή χειροκίνητα)</span><span>Όχημα</span>
     </div>
     ${devices.map((device) => `
       <div class="device-row tb-row">
         <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
         <span>${mobilityLabel(device.mobility)}</span>
-        <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="π.χ. 10.0.0.12" onchange="saveDeviceIp(this)">
+        <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="π.χ. 10.249.19.21" onchange="saveDeviceIp(this)">
         <span class="mono">${escapeHtml(device.busNo || "—")}</span>
       </div>
     `).join("")}
   `;
 }
 
-async function startThingsBoardLookup() {
-  const pending = devices.filter((device) => !device.ip);
-  const target = pending.length ? pending : devices;
+async function resolveIpsFromFiles() {
   const button = document.querySelector("#tb-lookup");
   if (button) {
     button.disabled = true;
   }
-  setTbLog("Opening ThingsBoard. Log in in the Chrome window if asked.");
-  const response = await fetch("/api/thingsboard/lookup", {
+  setTbLog("Διάβασμα Ips_TVM360.json και Ips_Mobile.json…");
+  const response = await fetch("/api/devices/resolve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      devices: target.map((device) => ({
-        serviceAccountId: device.serviceAccountId,
-        mobility: device.mobility
-      }))
+      serviceAccountIds: devices.map((device) => device.serviceAccountId)
     })
   });
-  if (!response.ok && response.status !== 202) {
-    const payload = await response.json().catch(() => ({}));
-    setTbLog(payload.message || "Could not start lookup.");
-    if (button) {
-      button.disabled = false;
-    }
+  const payload = await response.json().catch(() => ({}));
+  if (button) {
+    button.disabled = false;
+  }
+  if (!response.ok) {
+    setTbLog(payload.message || "Δεν διαβάστηκαν τα αρχεία IP.");
     return;
   }
-  pollThingsBoard();
-}
-
-async function pollThingsBoard() {
-  if (window.__tbTimer) {
-    clearInterval(window.__tbTimer);
-  }
-
-  const tick = async () => {
-    try {
-      const response = await fetch("/api/thingsboard/status");
-      if (!response.ok) {
-        return;
-      }
-      const status = await response.json();
-      applyThingsBoardStatus(status);
-      if (!status.running) {
-        clearInterval(window.__tbTimer);
-        const button = document.querySelector("#tb-lookup");
-        if (button) {
-          button.disabled = false;
-        }
-      }
-    } catch {
-      // Keep polling until the lookup process finishes.
-    }
-  };
-
-  await tick();
-  window.__tbTimer = setInterval(tick, 1500);
-}
-
-function applyThingsBoardStatus(status) {
-  let changed = false;
-  for (const result of status.results || []) {
-    const device = devices.find((item) => item.serviceAccountId === result.serviceAccountId);
+  for (const hit of payload.hits || []) {
+    const device = devices.find((item) => item.serviceAccountId === hit.serviceAccountId);
     if (!device) {
       continue;
     }
-    if (result.ipAddress && device.ip !== result.ipAddress) {
-      device.ip = result.ipAddress;
-      changed = true;
-    }
-    if (result.busNo && device.busNo !== result.busNo) {
-      device.busNo = result.busNo;
-      changed = true;
-    }
+    device.ip = hit.ipAddress;
+    device.busNo = hit.busNo || device.busNo;
+    device.ipSource = hit.source;
   }
   const list = document.querySelector("#tb-devices");
-  const typing = document.activeElement?.classList?.contains("ip-edit");
-  if (list && changed && !typing) {
+  if (list) {
     list.innerHTML = renderDeviceRows();
   }
-  setTbLog((status.log || []).join("\n"));
+  const missing = payload.missing || [];
+  setTbLog([
+    `Κατάλογος: ${payload.catalogCount} συσκευές.`,
+    `Βρέθηκαν: ${payload.matchedCount}.`,
+    missing.length ? `Χωρίς IP: ${missing.join(", ")}` : "Όλες οι συσκευές του Excel έχουν IP."
+  ].join("\n"));
 }
 
 function setTbLog(text) {
@@ -558,14 +519,14 @@ function renderDownload() {
 
   dlBody.innerHTML = `
     <h2>Logs για κατηγορία ${escapeHtml(selectedResult)}</h2>
-    <p class="hint">${ready} από ${devices.length} έχουν IP. Κινητά: ping → zip nlog-all-ΗΜΕΡΟΜΗΝΙΑ.zip → WinSCP get. Σταθερά: get το .log της ημέρας. Αν το κατέβασμα αποτύχει, διάλεξε το nlog στη συσκευή.</p>
+    <p class="hint">${ready} από ${devices.length} έχουν IP. Κατέβασμα: scp -P 1030 amco@IP:/opt/amco/middleware/TVMserver/nlog-all-ΗΜΕΡΟΜΗΝΙΑ.log στο Desktop\\Nikos\\ΣΥΣΚΕΥΗ. Αν αποτύχει, διάλεξε το nlog στη συσκευή.</p>
     <div class="split">
       <div>
-        <h3>Σταθερά · SFTP</h3>
+        <h3>Σταθερά</h3>
         ${deviceMiniList(fixed)}
       </div>
       <div>
-        <h3>Κινητά · ping + zip</h3>
+        <h3>Κινητά</h3>
         ${deviceMiniList(mobile)}
       </div>
     </div>
@@ -573,7 +534,7 @@ function renderDownload() {
     <pre id="dl-log" class="tb-log"></pre>
     <div class="actions">
       <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>
-      <button type="button" class="primary" id="start-download" onclick="startLogDownload()">Κατέβασμα με WinSCP</button>
+      <button type="button" class="primary" id="start-download" onclick="startLogDownload()">Κατέβασμα με scp</button>
       <button type="button" class="primary" id="to-process" ${hasAnyLog() ? "" : "disabled"} onclick="goToStep(4)">Συνέχεια στο πόρισμα</button>
     </div>
   `;
@@ -632,7 +593,7 @@ async function startLogDownload() {
   if (button) {
     button.disabled = true;
   }
-  setDlLog("Starting ping / WinSCP…");
+  setDlLog("Starting scp -P 1030…");
   const response = await fetch("/api/logs/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
