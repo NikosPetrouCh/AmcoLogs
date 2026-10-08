@@ -437,7 +437,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                 service_account_id VARCHAR(64) NOT NULL PRIMARY KEY,
                 ip_address VARCHAR(64) NOT NULL,
                 mobility VARCHAR(16) NOT NULL,
-                source VARCHAR(32) NOT NULL DEFAULT 'thingsboard',
+                source VARCHAR(32) NOT NULL DEFAULT 'ip-file',
                 updated_at DATETIME(6) NOT NULL,
                 bus_no VARCHAR(64) NULL
             )

@@ -180,7 +180,7 @@ button, input {
   font-size: 13px;
 }
 
-.tb-row {
+.ip-row {
   grid-template-columns: 1.1fr 0.6fr 1fr 0.9fr;
   align-items: center;
 }
@@ -299,7 +299,7 @@ button, input {
   margin-top: 8px;
 }
 
-.tb-log {
+.run-log {
   margin-top: 16px;
   max-height: 180px;
   overflow: auto;
@@ -557,6 +557,42 @@ th {
 .panel {
   margin-top: 0;
   margin-bottom: 18px;
+}
+
+.catalog-form {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.8fr auto;
+  gap: 10px;
+  align-items: end;
+  margin: 12px 0 8px;
+}
+
+.catalog-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.catalog-form input {
+  border: 1px solid var(--line);
+  background: white;
+  padding: 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+}
+
+.catalog-form button {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+  height: 36px;
+}
+
+@media (max-width: 900px) {
+  .catalog-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 .db-form {

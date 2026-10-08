@@ -7,6 +7,9 @@
 .env
 appsettings.Local.json
 
+# Local-only code walkthrough — never push
+ΚΩΔΙΚΑΣ-ΑΝΑΛΥΣΗ.md
+
 samples/
 
 # User-specific files
@@ -37,6 +40,10 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+!src/AmcoLogs.Core/Logs/
+!src/AmcoLogs.Core/Logs/**
+!src/AmcoLogs.Infrastructure/Logs/
+!src/AmcoLogs.Infrastructure/Logs/**
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/

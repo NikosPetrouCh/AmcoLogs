@@ -14,9 +14,9 @@ const kicker = document.querySelector("#kicker");
 const stageTitle = document.querySelector("#stage-title");
 const stageLede = document.querySelector("#stage-lede");
 const stepExcel = document.querySelector("#step-excel");
-const stepThingsboard = document.querySelector("#step-thingsboard");
+const stepIps = document.querySelector("#step-ips");
 const stepDownload = document.querySelector("#step-download");
-const tbBody = document.querySelector("#tb-body");
+const ipBody = document.querySelector("#ip-body");
 const dlBody = document.querySelector("#dl-body");
 const prBody = document.querySelector("#pr-body");
 const stepProcess = document.querySelector("#step-process");
@@ -31,7 +31,7 @@ const STEP_COPY = {
   2: {
     kicker: "Βήμα 2 από 4",
     title: "Εύρεση IP",
-    lede: "Οι IP βγαίνουν από τα αρχεία Ips_TVM360.json και Ips_Mobile.json. Αν λείπει κάποια, γράψε την χειροκίνητα."
+    lede: "Οι αντιστοιχίες CTVM → IP → όχημα έρχονται από τα δύο JSON. Ό,τι λείπει το γράφεις χειροκίνητα και μένει στη βάση CTVM IPs."
   },
   3: {
     kicker: "Βήμα 3 από 4",
@@ -54,7 +54,7 @@ const DB_COPY = {
   ips: {
     kicker: "Database",
     title: "CTVM IPs",
-    lede: "ServiceAccountID → IP από Ips_TVM360 / Ips_Mobile ή χειροκίνητη καταχώρηση."
+    lede: "Αντιστοιχίες από Ips_TVM360.json, Ips_Mobile.json και ό,τι πέρασες χειροκίνητα (CTVM, IP, όχημα)."
   },
   general: {
     kicker: "Database",
@@ -69,7 +69,7 @@ let importedRows = [];
 let selectedResult = null;
 let fileName = "";
 let devices = [];
-let reachedThingsboard = false;
+let reachedIps = false;
 let lastFindings = [];
 
 browse.addEventListener("click", () => fileInput.click());
@@ -176,7 +176,7 @@ function renderImport(payload) {
   dropzone.classList.add("compact");
   currentStep = 1;
   currentView = "flow";
-  reachedThingsboard = false;
+  reachedIps = false;
   lastFindings = [];
 
   const savedNote = payload.saved
@@ -229,7 +229,7 @@ function renderSelection() {
     <h2>Κατηγορία ${escapeHtml(selectedResult)}</h2>
     <p>${countLabel(rows.length, "συναλλαγή", "συναλλαγές")} από ${countLabel(devices.length, "συσκευή", "συσκευές")}. Αποθηκεύονται Transaction ID, RRN, Amount, ημερομηνία και τύπος συσκευής.</p>
     <div class="actions">
-      <button type="button" class="primary" id="to-thingsboard" onclick="goToStep(2)">Συνέχεια στις IPs</button>
+      <button type="button" class="primary" id="to-ips" onclick="goToStep(2)">Συνέχεια στις IPs</button>
     </div>
     <details>
       <summary>Προβολή γραμμών</summary>
@@ -251,7 +251,7 @@ async function goToStep(step) {
   if (step >= 2 && (!selectedResult || devices.length === 0)) {
     return;
   }
-  if (step === 3 && !reachedThingsboard) {
+  if (step === 3 && !reachedIps) {
     return;
   }
   if (step === 4 && !hasAnyLog()) {
@@ -259,7 +259,7 @@ async function goToStep(step) {
   }
   if (step >= 2) {
     await mergeCachedIps();
-    reachedThingsboard = true;
+    reachedIps = true;
   }
   currentStep = step;
   currentView = "flow";
@@ -277,7 +277,7 @@ function renderApp() {
     stageTitle.textContent = copy.title;
     stageLede.textContent = copy.lede;
     stepExcel.hidden = true;
-    stepThingsboard.hidden = true;
+    stepIps.hidden = true;
     stepDownload.hidden = true;
     stepProcess.hidden = true;
     dbView.hidden = false;
@@ -292,12 +292,12 @@ function renderApp() {
   stageLede.textContent = copy.lede;
   dbView.hidden = true;
   stepExcel.hidden = currentStep !== 1;
-  stepThingsboard.hidden = currentStep !== 2;
+  stepIps.hidden = currentStep !== 2;
   stepDownload.hidden = currentStep !== 3;
   stepProcess.hidden = currentStep !== 4;
   renderPipeline();
   if (currentStep === 2) {
-    renderThingsboard();
+    renderIps();
   }
   if (currentStep === 3) {
     renderDownload();
@@ -314,7 +314,7 @@ function renderPipeline() {
     item.classList.toggle("done", currentView === "flow" && step < currentStep);
     const button = item.querySelector(".pipeline-btn");
     const locked = (step === 2 && (!selectedResult || devices.length === 0))
-      || (step === 3 && !reachedThingsboard)
+      || (step === 3 && !reachedIps)
       || (step === 4 && !hasAnyLog());
     button.disabled = locked;
   });
@@ -380,18 +380,67 @@ async function renderCtvmIps() {
   const mappings = await fetchJson("/api/devices");
   dbBody.innerHTML = `
     <h2>CTVM IPs</h2>
-    <p class="hint">${mappings.length ? `${mappings.length} cached mappings.` : "Δεν υπάρχουν ακόμα IP. Θα μπουν από τα δύο JSON ή χειροκίνητα."}</p>
+    <p class="hint">Η βάση ενώνει τα δύο JSON με τις χειροκίνητες εγγραφές. Αν λείπει IP, CTVM ή όχημα από το αρχείο, πέρασέ το εδώ.</p>
+    <form id="manual-ip-form" class="catalog-form" onsubmit="return saveManualCatalog(event)">
+      <label>CTVM / ServiceAccountID <input name="serviceAccountId" placeholder="CTVM46240918" autocomplete="off" required></label>
+      <label>IP <input name="ipAddress" placeholder="10.249.19.21" autocomplete="off" required></label>
+      <label>Όχημα <input name="busNo" placeholder="π.χ. 2216" autocomplete="off"></label>
+      <button type="submit">Αποθήκευση χειροκίνητα</button>
+    </form>
+    <p id="manual-ip-status" class="hint"></p>
+    <p class="hint">${mappings.length ? `${mappings.length} αντιστοιχίες (JSON + χειροκίνητα).` : "Άδειος κατάλογος — βάλε τα JSON στο data/ ή πέρασε μία γραμμή παραπάνω."}</p>
     ${renderTable(
-      ["ServiceAccountID", "IP", "Type", "Source", "Updated"],
+      ["CTVM", "IP", "Όχημα", "Τύπος", "Πηγή", "Updated"],
       mappings.map((item) => [
         item.serviceAccountId,
         item.ipAddress,
+        item.busNo || "",
         item.mobility,
         item.source,
         formatDate(item.updatedAt)
       ])
     )}
   `;
+}
+
+async function saveManualCatalog(event) {
+  event.preventDefault();
+  const form = event.target;
+  const data = new FormData(form);
+  const payload = {
+    serviceAccountId: String(data.get("serviceAccountId") || "").trim(),
+    ipAddress: String(data.get("ipAddress") || "").trim(),
+    busNo: String(data.get("busNo") || "").trim()
+  };
+  const status = document.querySelector("#manual-ip-status");
+  const response = await fetch("/api/devices/ip", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (status) {
+      status.textContent = body.message || "Δεν αποθηκεύτηκε.";
+    }
+    return false;
+  }
+  const device = devices.find((item) => digitsOf(item.serviceAccountId) === digitsOf(payload.serviceAccountId));
+  if (device) {
+    device.ip = payload.ipAddress;
+    device.busNo = payload.busNo || device.busNo;
+    device.ipSource = "manual";
+  }
+  const note = body.persisted
+    ? "Γράφτηκε στη MySQL (πηγή: manual)."
+    : (body.message || "Κρατήθηκε στη συνεδρία. Συνδέσου στη MySQL για μόνιμη αποθήκευση.");
+  form.reset();
+  await renderCtvmIps();
+  const after = document.querySelector("#manual-ip-status");
+  if (after) {
+    after.textContent = note;
+  }
+  return false;
 }
 
 async function renderExcelArchive() {
@@ -428,17 +477,17 @@ async function fetchJson(url) {
   }
 }
 
-function renderThingsboard() {
-  tbBody.innerHTML = `
+function renderIps() {
+  ipBody.innerHTML = `
     <h2>Συσκευές από κατηγορία ${escapeHtml(selectedResult)}</h2>
-    <p class="hint">IP από Ips_TVM360.json (σταθερά) και Ips_Mobile.json (κινητά). Αν λείπει, γράψε την στο πεδίο.</p>
-    <div class="device-list" id="tb-devices">
+    <p class="hint">IP και όχημα από Ips_TVM360.json / Ips_Mobile.json. Αν λείπει κάτι, γράψε το — πηγαίνει στη βάση CTVM IPs ως χειροκίνητο.</p>
+    <div class="device-list" id="ip-devices">
       ${renderDeviceRows()}
     </div>
-    <pre id="tb-log" class="tb-log"></pre>
+    <pre id="ip-log" class="run-log"></pre>
     <div class="actions">
       <button type="button" onclick="goToStep(1)">Πίσω στο Excel</button>
-      <button type="button" class="primary" id="tb-lookup" onclick="resolveIpsFromFiles()">Φόρτωση IP από αρχεία</button>
+      <button type="button" class="primary" id="ip-lookup" onclick="resolveIpsFromFiles()">Φόρτωση IP από αρχεία</button>
       <button type="button" class="primary" onclick="goToStep(3)">Συνέχεια στα logs</button>
     </div>
   `;
@@ -447,26 +496,26 @@ function renderThingsboard() {
 
 function renderDeviceRows() {
   return `
-    <div class="device-row tb-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
-      <span>ServiceAccountID</span><span>Τύπος</span><span>IP (αρχείο ή χειροκίνητα)</span><span>Όχημα</span>
+    <div class="device-row ip-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
+      <span>CTVM</span><span>Τύπος</span><span>IP</span><span>Όχημα</span>
     </div>
     ${devices.map((device) => `
-      <div class="device-row tb-row">
+      <div class="device-row ip-row">
         <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
         <span>${mobilityLabel(device.mobility)}</span>
-        <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="π.χ. 10.249.19.21" onchange="saveDeviceIp(this)">
-        <span class="mono">${escapeHtml(device.busNo || "—")}</span>
+        <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="π.χ. 10.249.19.21" onchange="saveDeviceMapping(this)">
+        <input class="ip-edit bus-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.busNo || "")}" placeholder="π.χ. 2216" onchange="saveDeviceMapping(this)">
       </div>
     `).join("")}
   `;
 }
 
 async function resolveIpsFromFiles() {
-  const button = document.querySelector("#tb-lookup");
+  const button = document.querySelector("#ip-lookup");
   if (button) {
     button.disabled = true;
   }
-  setTbLog("Διάβασμα Ips_TVM360.json και Ips_Mobile.json…");
+  setIpLog("Διάβασμα JSON + χειροκίνητων εγγραφών από τη βάση…");
   const response = await fetch("/api/devices/resolve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -479,7 +528,7 @@ async function resolveIpsFromFiles() {
     button.disabled = false;
   }
   if (!response.ok) {
-    setTbLog(payload.message || "Δεν διαβάστηκαν τα αρχεία IP.");
+    setIpLog(payload.message || "Δεν διαβάστηκαν τα αρχεία IP.");
     return;
   }
   for (const hit of payload.hits || []) {
@@ -491,20 +540,20 @@ async function resolveIpsFromFiles() {
     device.busNo = hit.busNo || device.busNo;
     device.ipSource = hit.source;
   }
-  const list = document.querySelector("#tb-devices");
+  const list = document.querySelector("#ip-devices");
   if (list) {
     list.innerHTML = renderDeviceRows();
   }
   const missing = payload.missing || [];
-  setTbLog([
-    `Κατάλογος: ${payload.catalogCount} συσκευές.`,
-    `Βρέθηκαν: ${payload.matchedCount}.`,
-    missing.length ? `Χωρίς IP: ${missing.join(", ")}` : "Όλες οι συσκευές του Excel έχουν IP."
+  setIpLog([
+    `JSON κατάλογος: ${payload.catalogCount} συσκευές.`,
+    `Βρέθηκαν (JSON ή χειροκίνητα): ${payload.matchedCount}.`,
+    missing.length ? `Χωρίς IP — γράψε την χειροκίνητα: ${missing.join(", ")}` : "Όλες οι συσκευές του Excel έχουν IP."
   ].join("\n"));
 }
 
-function setTbLog(text) {
-  const log = document.querySelector("#tb-log");
+function setIpLog(text) {
+  const log = document.querySelector("#ip-log");
   if (log) {
     log.textContent = text;
     log.scrollTop = log.scrollHeight;
@@ -531,7 +580,7 @@ function renderDownload() {
       </div>
     </div>
     ${other.length ? `<p class="hint">Άγνωστος τύπος: ${other.map((device) => device.serviceAccountId).join(", ")}</p>` : ""}
-    <pre id="dl-log" class="tb-log"></pre>
+    <pre id="dl-log" class="run-log"></pre>
     <div class="actions">
       <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>
       <button type="button" class="primary" id="start-download" onclick="startLogDownload()">Κατέβασμα με scp</button>
@@ -548,7 +597,7 @@ function deviceMiniList(list) {
     <div class="device-row dl-row">
       <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
       <span>${mobilityLabel(device.mobility)} · ${(device.logDates || []).join(", ") || "χωρίς ημερομηνία"}</span>
-      <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="IP" onchange="saveDeviceIp(this)">
+      <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="IP" onchange="saveDeviceMapping(this)">
       <label class="log-drop">Drop / επιλογή nlog
         <input type="file" accept=".log,.zip,.txt" data-id="${escapeHtml(device.serviceAccountId)}" onchange="uploadManualLog(this)">
       </label>
@@ -557,14 +606,17 @@ function deviceMiniList(list) {
   `).join("")}</div>`;
 }
 
-async function saveDeviceIp(input) {
+async function saveDeviceMapping(input) {
   const id = input.dataset.id;
-  const ip = input.value.trim();
   const device = devices.find((item) => item.serviceAccountId === id);
   if (!device) {
     return;
   }
+  const row = input.closest(".device-row");
+  const ip = (row?.querySelector(".ip-edit:not(.bus-edit)")?.value || device.ip || "").trim();
+  const bus = (row?.querySelector(".bus-edit")?.value || device.busNo || "").trim();
   device.ip = ip || null;
+  device.busNo = bus || null;
   if (!ip) {
     return;
   }
@@ -574,12 +626,16 @@ async function saveDeviceIp(input) {
     body: JSON.stringify({
       serviceAccountId: device.serviceAccountId,
       ipAddress: ip,
+      busNo: bus,
       mobility: device.mobility
     })
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
+    setIpLog(payload.message || "Invalid IP.");
     setDlLog(payload.message || "Invalid IP.");
+  } else {
+    device.ipSource = "manual";
   }
 }
 
@@ -725,7 +781,7 @@ function renderProcess() {
       ])
     )}
     <p class="hint" style="margin-top:16px;">Logs: ${logs.map((device) => device.serviceAccountId + " → " + (device.downloadStatus || device.localPath)).join(" · ") || "κανένα"}</p>
-    <pre id="pr-log" class="tb-log">${lastFindings.length ? "" : "Πάτα επεξεργασία για να βγει το πόρισμα."}</pre>
+    <pre id="pr-log" class="run-log">${lastFindings.length ? "" : "Πάτα επεξεργασία για να βγει το πόρισμα."}</pre>
     <div id="pr-results">${lastFindings.length ? renderFindings(lastFindings) : ""}</div>
     <div class="actions">
       <button type="button" onclick="goToStep(3)">Πίσω στα logs</button>
@@ -829,16 +885,17 @@ async function mergeCachedIps() {
       return;
     }
     const mappings = await response.json();
-    const byId = new Map(mappings.map((item) => [item.serviceAccountId, item]));
+    const byDigits = new Map(mappings.map((item) => [digitsOf(item.serviceAccountId), item]));
     devices = devices.map((device) => {
-      const cached = byId.get(device.serviceAccountId);
+      const cached = byDigits.get(digitsOf(device.serviceAccountId));
       if (!cached) {
         return device;
       }
       return {
         ...device,
         ip: cached.ipAddress || device.ip,
-        busNo: cached.busNo || device.busNo
+        busNo: cached.busNo || device.busNo,
+        ipSource: cached.source || device.ipSource
       };
     });
   } catch {
@@ -948,6 +1005,10 @@ async function loadStatus() {
 
 function uniqueIds(values) {
   return [...new Set((values || []).filter(Boolean).map((id) => String(id).trim()).filter(Boolean))];
+}
+
+function digitsOf(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
 function escapeHtml(value) {

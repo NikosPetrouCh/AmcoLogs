@@ -22,4 +22,5 @@ public interface IIpCatalog
     int Count { get; }
     DeviceIpHit? Find(string? serviceAccountId, string? mobility = null);
     IpResolveResult Resolve(IEnumerable<string> serviceAccountIds);
+    IReadOnlyList<DeviceIpHit> All();
 }

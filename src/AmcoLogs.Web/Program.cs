@@ -20,6 +20,7 @@ builder.Services.AddSingleton<IExcelImportParser, ClosedXmlExcelImportParser>();
 builder.Services.AddSingleton<IAmcoLogsStore, MySqlAmcoLogsStore>();
 builder.Services.AddSingleton<IIpCatalog>(_ =>
     new FileIpCatalog(Path.Combine(builder.Environment.ContentRootPath, "data")));
+builder.Services.AddSingleton<ManualIpCache>();
 builder.Services.AddSingleton(new DeviceAccessSettings
 {
     Username = builder.Configuration["DeviceAccess:Username"] ?? "amco",

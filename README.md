@@ -16,7 +16,7 @@
 | Οθόνη | Περιεχόμενο |
 | --- | --- |
 | Error reports | Πορίσματα: Transaction ID, παράθυρο γραμμών, ERROR |
-| CTVM IPs | ServiceAccountID → IP από τα δύο JSON ή χειροκίνητα |
+| CTVM IPs | Αντιστοιχίες CTVM → IP → όχημα από JSON + χειροκίνητες εγγραφές |
 | General | Τα στοιχεία της συναλλαγής από το Excel |
 
 ## Βήμα 1 — Excel
@@ -44,7 +44,9 @@
 - `Ips_TVM360.json` — σταθερά: `{ "CTVM36246554": "10.249.16.43", ... }`
 - `Ips_Mobile.json` — κινητά: `{ "vehicle", "ctvm", "ip" }`
 
-Το ServiceAccountID του Excel αντιστοιχίζεται στα ψηφία του `CTVM…`. Αν λείπει, γράψε την IP στο πεδίο.
+Το ServiceAccountID του Excel αντιστοιχίζεται στα ψηφία του `CTVM…`. Αν λείπει IP ή όχημα, γράψε το στο πεδίο (βήμα 2) ή στο **CTVM IPs** αριστερά. Η χειροκίνητη γραμμή αποθηκεύεται στη MySQL (`source = manual`) και την επόμενη φορά ενώνεται με τα JSON. Τα JSON **δεν** αλλάζουν· η βάση κρατά την ένωση.
+
+Τα δύο αρχεία μπαίνουν στο git (`src/AmcoLogs.Web/data/`). Με push ανεβαίνουν στο GitHub.
 
 ## Βήμα 3 — Logs
 
@@ -109,10 +111,12 @@ dotnet run --project src/AmcoLogs.Web/AmcoLogs.Web.csproj --urls http://localhos
 
 ## Τι δεν μπαίνει στο git
 
-- `*.log`, `samples/`
+- αρχεία `*.log` (τα nlog των συσκευών), `samples/`
 - `appsettings.Local.json`
 - downloads/uploads στο `%LocalAppData%\AmcoLogs\`
 - MySQL connection (`%LocalAppData%\AmcoLogs\mysql-connection.json`)
+
+Οι φάκελοι πηγαίου κώδικα `src/AmcoLogs.Core/Logs` και `src/AmcoLogs.Infrastructure/Logs` **μπαίνουν** στο git. Χωρίς αυτούς το build σπάει (`AmcoLogs.Core.Logs`, `InvestigationFinding`).
 
 Τα nlog έχουν σειριακούς καρτών και κλειδιά. Μην τα κάνεις commit.
 

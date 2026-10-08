@@ -6,7 +6,6 @@
 
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.1" />
-    <PackageReference Include="Microsoft.Playwright" Version="1.62.0" />
     <PackageReference Include="MySqlConnector" Version="2.6.2" />
   </ItemGroup>
 

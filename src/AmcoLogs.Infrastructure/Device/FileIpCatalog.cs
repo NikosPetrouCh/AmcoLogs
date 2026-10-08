@@ -91,6 +91,14 @@ public sealed class FileIpCatalog : IIpCatalog
         };
     }
 
+    public IReadOnlyList<DeviceIpHit> All()
+    {
+        lock (_gate)
+        {
+            return _byDigits.Values.SelectMany(list => list).ToArray();
+        }
+    }
+
     private void LoadFile(string path, string mobility, string source)
     {
         if (!File.Exists(path))
