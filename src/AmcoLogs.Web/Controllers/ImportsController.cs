@@ -37,7 +37,7 @@ public sealed class ImportsController : ControllerBase
         }
 
         await using var stream = file.OpenReadStream();
-        var parsed = _parser.Parse(stream, file.FileName);
+        var screened = TransactionScreen.Apply(_parser.Parse(stream, file.FileName));
 
         SavedExcelImport? saved = null;
         string? persistMessage = null;
@@ -50,13 +50,13 @@ public sealed class ImportsController : ControllerBase
             }
             else
             {
-                saved = await _store.SaveImportAsync(parsed, cancellationToken);
+                saved = await _store.SaveImportAsync(TransactionScreen.WithoutExcluded(screened), cancellationToken);
             }
         }
 
         return Ok(new ExcelImportResponse
         {
-            Import = parsed,
+            Import = screened,
             Saved = saved,
             PersistMessage = persistMessage
         });

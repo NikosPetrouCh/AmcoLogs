@@ -21,12 +21,11 @@ const dlBody = document.querySelector("#dl-body");
 const prBody = document.querySelector("#pr-body");
 const stepProcess = document.querySelector("#step-process");
 
-const KNOWN_RESULTS = ["01", "02", "03", "04"];
 const STEP_COPY = {
   1: {
     kicker: "Βήμα 1 από 4",
     title: "Εισαγωγή Excel",
-    lede: "Άσε το Excel. Η εφαρμογή κρατά Transaction ID, RRN, Amount, TransactionDate και αν η συσκευή είναι κινητή (ξεκινά από 4) ή σταθερή (ξεκινά από 36)."
+    lede: "Ό,τι δεν είναι CTVM και 8 ψηφία, και όλος ο τύπος 04, μένουν έξω. Στις IP περνάει μόνο ο τύπος 02 που δεν έχει ποσό 0,02. Το YES και το NO βγαίνουν στο πόρισμα."
   },
   2: {
     kicker: "Βήμα 2 από 4",
@@ -41,7 +40,7 @@ const STEP_COPY = {
   4: {
     kicker: "Βήμα 4 από 4",
     title: "Πόρισμα",
-    lede: "Ψάχνει μόνο τη συναλλαγή του Excel: Selecting product + Transaction ID, μόνο κάρτα, και μαζεύει ERROR σε αυτό το παράθυρο."
+    lede: "Εδώ κλείνει το αρχείο: YES ή NO. Αυτόματο YES είναι ο τύπος 03 και ο τύπος 02 με ποσό 0,02."
   }
 };
 
@@ -66,7 +65,6 @@ const DB_COPY = {
 let currentStep = 1;
 let currentView = "flow";
 let importedRows = [];
-let selectedResult = null;
 let fileName = "";
 let devices = [];
 let reachedIps = false;
@@ -98,18 +96,6 @@ dropzone.addEventListener("drop", (event) => {
   if (file) {
     uploadExcel(file);
   }
-});
-
-categories.addEventListener("click", (event) => {
-  const card = event.target.closest(".result-card");
-  if (!card || card.disabled) {
-    return;
-  }
-  selectedResult = card.dataset.result;
-  refreshDevices();
-  renderCategories();
-  renderSelection();
-  renderPipeline();
 });
 
 document.querySelector(".pipeline").addEventListener("click", (event) => {
@@ -171,7 +157,6 @@ function renderImport(payload) {
   const importData = payload.import;
   importedRows = importData.rows || [];
   fileName = importData.fileName;
-  selectedResult = firstPopulatedResult();
   refreshDevices();
   dropzone.classList.add("compact");
   currentStep = 1;
@@ -180,7 +165,7 @@ function renderImport(payload) {
   lastFindings = [];
 
   const savedNote = payload.saved
-    ? `Αποθηκεύτηκαν ${payload.saved.rowCount} γραμμές στη MySQL.`
+    ? `Αποθηκεύτηκαν ${payload.saved.rowCount} γραμμές στη MySQL. Οι εξαιρέσεις δεν γράφτηκαν.`
     : (payload.persistMessage || "Το αρχείο διαβάστηκε.");
   const warnings = (importData.warnings || []).join(" ");
   setStatus(savedNote + (warnings ? " " + warnings : ""));
@@ -188,76 +173,110 @@ function renderImport(payload) {
   summary.hidden = false;
   summary.innerHTML = `
     <h2>${escapeHtml(fileName)}</h2>
-    <p>${countLabel(importedRows.length, "συναλλαγή", "συναλλαγές")} · διάλεξε κατηγορία για να περάσει στα επόμενα βήματα</p>
+    <p>${countLabel(importedRows.length, "γραμμή", "γραμμές")} στο Excel. Η απόφαση YES ή NO φαίνεται στο πόρισμα.</p>
   `;
 
-  renderCategories();
-  renderSelection();
+  renderScreen();
   renderApp();
 }
 
-function renderCategories() {
-  const groups = groupByResult(importedRows);
-  const extra = [...groups.keys()]
-    .filter((code) => !KNOWN_RESULTS.includes(code) && code !== "—")
-    .sort();
-  const codes = [...KNOWN_RESULTS, ...extra];
+function renderScreen() {
+  const yesType03 = rowsByDisposition("AutomaticYes").filter((row) => resultCode(row) === "03");
+  const yesTwoCents = rowsByDisposition("AutomaticYes").filter((row) => resultCode(row) !== "03");
+  const pending = needsIpRows();
+  const excludedId = rowsByDisposition("ExcludedInvalidServiceAccount");
+  const excludedType = rowsByDisposition("ExcludedType04");
+  const other = rowsByDisposition("Unclassified");
+  const excluded = excludedId.length + excludedType.length;
+  const continueLabel = pending.length ? "Συνέχεια στις IPs" : "Συνέχεια στο πόρισμα";
+  const continueStep = pending.length ? 2 : 4;
 
   categories.hidden = false;
-  categories.innerHTML = codes.map((code) => {
-    const rows = groups.get(code) || [];
-    const empty = rows.length === 0;
-    const selected = selectedResult === code;
-    return `
-      <button type="button" class="result-card${selected ? " selected" : ""}" data-result="${escapeHtml(code)}" ${empty ? "disabled" : ""}>
-        <div class="result-code">${escapeHtml(code)}</div>
-        <p class="result-meta">${countLabel(rows.length, "συναλλαγή", "συναλλαγές")} · ${countLabel(countDevices(rows), "συσκευή", "συσκευές")}</p>
-      </button>
-    `;
-  }).join("");
-}
+  categories.innerHTML = `
+    <div class="result-card yes">
+      <div class="result-code">03</div>
+      <p class="result-meta">${countLabel(yesType03.length, "συναλλαγή", "συναλλαγές")} · YES</p>
+    </div>
+    <div class="result-card yes">
+      <div class="result-code">0,02</div>
+      <p class="result-meta">${countLabel(yesTwoCents.length, "συναλλαγή", "συναλλαγές")} · τύπος 02, YES</p>
+    </div>
+    <div class="result-card ip">
+      <div class="result-code">02</div>
+      <p class="result-meta">${countLabel(pending.length, "συναλλαγή", "συναλλαγές")} · μένουν για εύρεση IP</p>
+    </div>
+    <div class="result-card out">
+      <div class="result-code word">ΕΚΤΟΣ</div>
+      <p class="result-meta">${countLabel(excluded, "συναλλαγή", "συναλλαγές")} · άκυρο CTVM ή τύπος 04</p>
+    </div>
+  `;
 
-function renderSelection() {
-  if (!selectedResult) {
-    selection.hidden = true;
-    return;
-  }
-
-  const rows = rowsFor(selectedResult);
   selection.hidden = false;
   selection.innerHTML = `
-    <h2>Κατηγορία ${escapeHtml(selectedResult)}</h2>
-    <p>${countLabel(rows.length, "συναλλαγή", "συναλλαγές")} από ${countLabel(devices.length, "συσκευή", "συσκευές")}. Αποθηκεύονται Transaction ID, RRN, Amount, ημερομηνία και τύπος συσκευής.</p>
+    <h2>YES</h2>
+    <p>Φαίνονται εδώ και κλείνουν ως YES στο πόρισμα. Δεν πάνε για IP.</p>
+    <details>
+      <summary>Τύπος 03 · ${yesType03.length}</summary>
+      ${yesType03.length ? screenTable(yesType03, true) : "<p>Καμία γραμμή.</p>"}
+    </details>
+    <details>
+      <summary>Τύπος 02 με ποσό 0,02 · ${yesTwoCents.length}</summary>
+      ${yesTwoCents.length ? screenTable(yesTwoCents, true) : "<p>Καμία γραμμή.</p>"}
+    </details>
+    <h2 class="screen-next">Τύπος 02 για IP</h2>
+    <p>${countLabel(pending.length, "συναλλαγή", "συναλλαγές")} από ${countLabel(devices.length, "συσκευή", "συσκευές")}. Ποσό διαφορετικό από 0,02. Η απόφασή τους βγαίνει στο πόρισμα.</p>
+    ${pending.length ? `<details><summary>Προβολή γραμμών</summary>${screenTable(pending, false)}</details>` : ""}
     <div class="actions">
-      <button type="button" class="primary" id="to-ips" onclick="goToStep(2)">Συνέχεια στις IPs</button>
+      <button type="button" class="primary" id="to-ips" onclick="goToStep(${continueStep})" ${importedRows.length ? "" : "disabled"}>${continueLabel}</button>
     </div>
     <details>
-      <summary>Προβολή γραμμών</summary>
-      ${renderTable(
-        ["ServiceAccountID", "RRN", "Amount", "TransactionID", "Ημερομηνία"],
-        rows.map((row) => [
-          row.immediate.serviceAccountId || "",
-          row.immediate.rrn || "",
-          row.immediate.amount ?? "",
-          row.immediate.transactionId || "",
-          formatDate(row.immediate.transactionDate)
-        ])
-      )}
+      <summary>Εξαιρέσεις · ${excluded}</summary>
+      <p>Άκυρο ServiceAccountID (όχι CTVM και 8 ψηφία): ${excludedId.length}. Τύπος 04: ${excludedType.length}.</p>
+      ${excluded ? screenTable([...excludedId, ...excludedType], false) : ""}
     </details>
+    ${other.length ? `
+      <details>
+        <summary>Χωρίς κανόνα · ${other.length}</summary>
+        <p>Τύπος 01 και ό,τι άλλο δεν είναι 02, 03 ή 04 μένει εδώ. Δεν γίνεται YES και δεν πάει σε IP.</p>
+        ${screenTable(other, false)}
+      </details>` : ""}
   `;
 }
 
+function screenTable(rows, showDecision) {
+  const headers = ["ServiceAccountID", "Τύπος", "Amount", "Λόγος", "TransactionID"];
+  if (showDecision) {
+    headers.push("Απόφαση");
+  }
+  return renderTable(
+    headers,
+    rows.map((row) => {
+      const cells = [
+        row.immediate.serviceAccountId || "",
+        row.immediate.eticketTransactionResult || "",
+        row.immediate.amount ?? "",
+        row.screenReason || "",
+        row.immediate.transactionId || ""
+      ];
+      if (showDecision) {
+        cells.push(row.decision || "");
+      }
+      return cells;
+    })
+  );
+}
+
 async function goToStep(step) {
-  if (step >= 2 && (!selectedResult || devices.length === 0)) {
+  if ((step === 2 || step === 3) && devices.length === 0) {
     return;
   }
   if (step === 3 && !reachedIps) {
     return;
   }
-  if (step === 4 && !hasAnyLog()) {
+  if (step === 4 && importedRows.length === 0) {
     return;
   }
-  if (step >= 2) {
+  if (step === 2 || step === 3) {
     await mergeCachedIps();
     reachedIps = true;
   }
@@ -313,9 +332,9 @@ function renderPipeline() {
     item.classList.toggle("active", currentView === "flow" && step === currentStep);
     item.classList.toggle("done", currentView === "flow" && step < currentStep);
     const button = item.querySelector(".pipeline-btn");
-    const locked = (step === 2 && (!selectedResult || devices.length === 0))
+    const locked = (step === 2 && devices.length === 0)
       || (step === 3 && !reachedIps)
-      || (step === 4 && !hasAnyLog());
+      || (step === 4 && importedRows.length === 0);
     button.disabled = locked;
   });
 }
@@ -449,7 +468,7 @@ async function renderExcelArchive() {
     <h2>General</h2>
     <p class="hint">${rows.length ? `${rows.length} συναλλαγές από Excel.` : "Δεν υπάρχει ακόμα αρχείο Excel."}</p>
     ${renderTable(
-      ["File", "ServiceAccountID", "RRN", "Amount", "EticketTransactionResult", "TransactionID", "TransactionDate", "Type", "Extra"],
+      ["File", "ServiceAccountID", "RRN", "Amount", "EticketTransactionResult", "TransactionID", "TransactionDate", "Type", "Extra", "Απόφαση"],
       rows.map((row) => [
         row.fileName,
         row.serviceAccountId || "",
@@ -459,7 +478,8 @@ async function renderExcelArchive() {
         row.transactionId || "",
         formatDate(row.transactionDate),
         row.mobility,
-        row.extraJson || ""
+        row.extraJson || "",
+        row.decision || ""
       ])
     )}
   `;
@@ -479,7 +499,7 @@ async function fetchJson(url) {
 
 function renderIps() {
   ipBody.innerHTML = `
-    <h2>Συσκευές από κατηγορία ${escapeHtml(selectedResult)}</h2>
+    <h2>Συσκευές τύπου 02</h2>
     <p class="hint">IP και όχημα από Ips_TVM360.json / Ips_Mobile.json. Αν λείπει κάτι, γράψε το — πηγαίνει στη βάση CTVM IPs ως χειροκίνητο.</p>
     <div class="device-list" id="ip-devices">
       ${renderDeviceRows()}
@@ -488,6 +508,7 @@ function renderIps() {
     <div class="actions">
       <button type="button" onclick="goToStep(1)">Πίσω στο Excel</button>
       <button type="button" class="primary" id="ip-lookup" onclick="resolveIpsFromFiles()">Φόρτωση IP από αρχεία</button>
+      <button type="button" id="ssh-ping" onclick="pingDevices()" disabled>Ping</button>
       <button type="button" class="primary" onclick="goToStep(3)">Συνέχεια στα logs</button>
     </div>
   `;
@@ -497,7 +518,7 @@ function renderIps() {
 function renderDeviceRows() {
   return `
     <div class="device-row ip-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
-      <span>CTVM</span><span>Τύπος</span><span>IP</span><span>Όχημα</span>
+      <span>CTVM</span><span>Τύπος</span><span>IP</span><span>Όχημα</span><span>SSH</span>
     </div>
     ${devices.map((device) => `
       <div class="device-row ip-row">
@@ -505,6 +526,7 @@ function renderDeviceRows() {
         <span>${mobilityLabel(device.mobility)}</span>
         <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="π.χ. 10.249.19.21" onchange="saveDeviceMapping(this)">
         <input class="ip-edit bus-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.busNo || "")}" placeholder="π.χ. 2216" onchange="saveDeviceMapping(this)">
+        <span class="${device.pingReachable === true ? "verdict-ok" : device.pingReachable === false ? "verdict-bad" : ""}">${escapeHtml(device.pingLabel || "")}</span>
       </div>
     `).join("")}
   `;
@@ -528,6 +550,7 @@ async function resolveIpsFromFiles() {
     button.disabled = false;
   }
   if (!response.ok) {
+    refreshPingButton();
     setIpLog(payload.message || "Δεν διαβάστηκαν τα αρχεία IP.");
     return;
   }
@@ -539,16 +562,84 @@ async function resolveIpsFromFiles() {
     device.ip = hit.ipAddress;
     device.busNo = hit.busNo || device.busNo;
     device.ipSource = hit.source;
+    device.pingReachable = null;
+    device.pingLabel = "";
   }
   const list = document.querySelector("#ip-devices");
   if (list) {
     list.innerHTML = renderDeviceRows();
   }
   const missing = payload.missing || [];
+  refreshPingButton();
   setIpLog([
     `JSON κατάλογος: ${payload.catalogCount} συσκευές.`,
     `Βρέθηκαν (JSON ή χειροκίνητα): ${payload.matchedCount}.`,
     missing.length ? `Χωρίς IP — γράψε την χειροκίνητα: ${missing.join(", ")}` : "Όλες οι συσκευές του Excel έχουν IP."
+  ].join("\n"));
+}
+
+function refreshPingButton() {
+  const button = document.querySelector("#ssh-ping");
+  if (button && !button.dataset.busy) {
+    button.disabled = devicesWithIp().length === 0;
+  }
+}
+
+function devicesWithIp() {
+  return devices.filter((device) => String(device.ip || "").trim());
+}
+
+async function pingDevices() {
+  const target = devicesWithIp();
+  const button = document.querySelector("#ssh-ping");
+  if (!target.length) {
+    setIpLog("Πρώτα χρειάζεται IP για να σταλεί SSH ping.");
+    refreshPingButton();
+    return;
+  }
+  if (button) {
+    button.disabled = true;
+    button.dataset.busy = "1";
+  }
+  setIpLog("SSH ping: πρώτα απευθείας 8022, αν αποτύχει tunnel 1030…");
+  const response = await fetch("/api/logs/ping", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      devices: target.map((device) => ({
+        serviceAccountId: device.serviceAccountId,
+        ipAddress: String(device.ip).trim()
+      }))
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (button) {
+    delete button.dataset.busy;
+  }
+  if (!response.ok) {
+    refreshPingButton();
+    setIpLog(payload.message || "Το SSH ping απέτυχε.");
+    return;
+  }
+  const results = Array.isArray(payload) ? payload : [];
+  for (const result of results) {
+    const device = devices.find((item) => item.serviceAccountId === result.serviceAccountId);
+    if (!device) {
+      continue;
+    }
+    device.pingReachable = result.reachable === true;
+    device.pingLabel = result.reachable ? (result.path === "tunnel" ? "tunnel" : "απευθείας") : "αποτυχία";
+    device.pingPort = result.port || null;
+  }
+  const list = document.querySelector("#ip-devices");
+  if (list) {
+    list.innerHTML = renderDeviceRows();
+  }
+  refreshPingButton();
+  const ok = results.filter((item) => item.reachable).length;
+  setIpLog([
+    `SSH ping: ${ok} από ${results.length} έχουν σύνδεση.`,
+    ...results.map((item) => item.message)
   ].join("\n"));
 }
 
@@ -567,7 +658,7 @@ function renderDownload() {
   const ready = devices.filter((device) => device.ip).length;
 
   dlBody.innerHTML = `
-    <h2>Logs για κατηγορία ${escapeHtml(selectedResult)}</h2>
+    <h2>Logs για τον τύπο 02 που μένει</h2>
     <p class="hint">${ready} από ${devices.length} έχουν IP. Κατέβασμα: scp -P 1030 amco@IP:/opt/amco/middleware/TVMserver/nlog-all-ΗΜΕΡΟΜΗΝΙΑ.log στο Desktop\\Nikos\\ΣΥΣΚΕΥΗ. Αν αποτύχει, διάλεξε το nlog στη συσκευή.</p>
     <div class="split">
       <div>
@@ -617,6 +708,14 @@ async function saveDeviceMapping(input) {
   const bus = (row?.querySelector(".bus-edit")?.value || device.busNo || "").trim();
   device.ip = ip || null;
   device.busNo = bus || null;
+  device.pingReachable = null;
+  device.pingLabel = "";
+  refreshPingButton();
+  const status = row?.querySelector("span:last-child");
+  if (status) {
+    status.textContent = "";
+    status.className = "";
+  }
   if (!ip) {
     return;
   }
@@ -764,30 +863,60 @@ async function uploadManualLog(input) {
 }
 
 function renderProcess() {
-  const rows = rowsFor(selectedResult);
+  const yes = decisionRows("YES");
+  const no = decisionRows("NO");
+  const pending = needsIpRows();
   const logs = devices.filter((device) => device.localPath);
   prBody.innerHTML = `
-    <h2>Πόρισμα κατηγορίας ${escapeHtml(selectedResult)}</h2>
-    <p class="hint">${countLabel(rows.length, "συναλλαγή", "συναλλαγές")} από το Excel · ${countLabel(logs.length, "log", "logs")}. Ψάχνει μόνο αυτά τα Transaction ID, μόνο κάρτα.</p>
-    ${renderTable(
-      ["ServiceAccountID", "TransactionID", "RRN", "Amount", "Ημερομηνία", "Τύπος"],
-      rows.map((row) => [
-        row.immediate.serviceAccountId || "",
-        row.immediate.transactionId || "",
-        row.immediate.rrn || "",
-        row.immediate.amount ?? "",
-        formatDate(row.immediate.transactionDate),
-        mobilityLabel(row.mobility)
-      ])
-    )}
-    <p class="hint" style="margin-top:16px;">Logs: ${logs.map((device) => device.serviceAccountId + " → " + (device.downloadStatus || device.localPath)).join(" · ") || "κανένα"}</p>
-    <pre id="pr-log" class="run-log">${lastFindings.length ? "" : "Πάτα επεξεργασία για να βγει το πόρισμα."}</pre>
-    <div id="pr-results">${lastFindings.length ? renderFindings(lastFindings) : ""}</div>
-    <div class="actions">
-      <button type="button" onclick="goToStep(3)">Πίσω στα logs</button>
-      <button type="button" class="primary" id="run-process" onclick="runProcess()">Επεξεργασία και αποθήκευση</button>
+    <div class="categories verdict-counts">
+      <div class="result-card yes">
+        <div class="result-code">YES</div>
+        <p class="result-meta">${countLabel(yes.length, "συναλλαγή", "συναλλαγές")}</p>
+      </div>
+      <div class="result-card no">
+        <div class="result-code">NO</div>
+        <p class="result-meta">${countLabel(no.length, "συναλλαγή", "συναλλαγές")}</p>
+      </div>
     </div>
+    <div class="verdict-grid">
+      <section class="verdict-panel">
+        <h2>YES</h2>
+        <p class="hint">${yes.length ? "Τύπος 03 και τύπος 02 με ποσό 0,02." : "Καμία συναλλαγή YES."}</p>
+        ${yes.length ? screenTable(yes, true) : ""}
+      </section>
+      <section class="verdict-panel">
+        <h2>NO</h2>
+        <p class="hint">${no.length ? "Συναλλαγές που κλείνουν ως NO." : "Καμία συναλλαγή NO."}</p>
+        ${no.length ? screenTable(no, true) : ""}
+      </section>
+    </div>
+    ${pending.length ? `
+      <h2 class="screen-next">Τύπος 02 που πέρασε από IP</h2>
+      <p class="hint">${countLabel(pending.length, "συναλλαγή", "συναλλαγές")} · ${countLabel(logs.length, "log", "logs")}. Αυτές δεν είναι ακόμα YES ή NO. Η επεξεργασία ψάχνει μόνο αυτά τα Transaction ID, μόνο κάρτα.</p>
+      ${renderTable(
+        ["ServiceAccountID", "TransactionID", "RRN", "Amount", "Ημερομηνία", "Τύπος"],
+        pending.map((row) => [
+          row.immediate.serviceAccountId || "",
+          row.immediate.transactionId || "",
+          row.immediate.rrn || "",
+          row.immediate.amount ?? "",
+          formatDate(row.immediate.transactionDate),
+          mobilityLabel(row.mobility)
+        ])
+      )}
+      <p class="hint" style="margin-top:16px;">Logs: ${logs.map((device) => device.serviceAccountId + " → " + (device.downloadStatus || device.localPath)).join(" · ") || "κανένα"}</p>
+      <pre id="pr-log" class="run-log">${lastFindings.length ? "" : "Πάτα επεξεργασία για τα logs του τύπου 02."}</pre>
+      <div id="pr-results">${lastFindings.length ? renderFindings(lastFindings) : ""}</div>
+      <div class="actions">
+        <button type="button" onclick="goToStep(3)" ${reachedIps ? "" : "disabled"}>Πίσω στα logs</button>
+        <button type="button" class="primary" id="run-process" onclick="runProcess()" ${logs.length ? "" : "disabled"}>Επεξεργασία και αποθήκευση</button>
+      </div>
+    ` : ""}
   `;
+}
+
+function decisionRows(decision) {
+  return importedRows.filter((row) => row.decision === decision);
 }
 
 async function runProcess() {
@@ -803,7 +932,7 @@ async function runProcess() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      transactions: rowsFor(selectedResult).map((row) => ({
+      transactions: needsIpRows().map((row) => ({
         transactionId: row.immediate.transactionId,
         rrn: row.immediate.rrn,
         amount: row.immediate.amount,
@@ -848,7 +977,7 @@ async function runProcess() {
 function refreshDevices() {
   const previous = new Map(devices.map((device) => [device.serviceAccountId, device]));
   const map = new Map();
-  for (const row of rowsFor(selectedResult)) {
+  for (const row of needsIpRows()) {
     const id = row.immediate.serviceAccountId;
     if (!id) {
       continue;
@@ -903,30 +1032,20 @@ async function mergeCachedIps() {
   }
 }
 
-function groupByResult(rows) {
-  const map = new Map();
-  for (const row of rows) {
-    const code = normalizeResult(row.immediate?.eticketTransactionResult);
-    const current = map.get(code) || [];
-    current.push(row);
-    map.set(code, current);
+function resultCode(row) {
+  const text = String(row.immediate?.eticketTransactionResult || "").trim();
+  if (/^\d+$/.test(text)) {
+    return text.padStart(2, "0");
   }
-  return map;
+  return text;
 }
 
-function firstPopulatedResult() {
-  const groups = groupByResult(importedRows);
-  return KNOWN_RESULTS.find((code) => (groups.get(code) || []).length > 0)
-    || [...groups.keys()].find((code) => (groups.get(code) || []).length > 0)
-    || null;
+function rowsByDisposition(name) {
+  return importedRows.filter((row) => row.disposition === name);
 }
 
-function rowsFor(code) {
-  return groupByResult(importedRows).get(code) || [];
-}
-
-function countDevices(rows) {
-  return new Set(rows.map((row) => row.immediate.serviceAccountId).filter(Boolean)).size;
+function needsIpRows() {
+  return rowsByDisposition("NeedsIp");
 }
 
 function countLabel(count, singular, plural) {
@@ -937,17 +1056,6 @@ function mobilityLabel(value) {
   if (value === "Fixed") return "Σταθερό";
   if (value === "Mobile") return "Κινητό";
   return "Άγνωστο";
-}
-
-function normalizeResult(value) {
-  if (value == null || String(value).trim() === "") {
-    return "—";
-  }
-  const text = String(value).trim();
-  if (/^\d+$/.test(text)) {
-    return text.padStart(2, "0");
-  }
-  return text;
 }
 
 function renderTable(headers, rows) {

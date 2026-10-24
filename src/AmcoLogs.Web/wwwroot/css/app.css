@@ -181,7 +181,7 @@ button, input {
 }
 
 .ip-row {
-  grid-template-columns: 1.1fr 0.6fr 1fr 0.9fr;
+  grid-template-columns: 1.1fr 0.55fr 1fr 0.75fr 0.7fr;
   align-items: center;
 }
 
@@ -449,6 +449,60 @@ h1, h2 {
   border-color: var(--copper-dark);
   box-shadow: inset 3px 0 0 var(--copper);
   background: #fff4e6;
+}
+
+.result-card.yes,
+.result-card.ip,
+.result-card.out {
+  cursor: default;
+}
+
+.result-card.yes {
+  box-shadow: inset 3px 0 0 var(--moss);
+}
+
+.result-card.ip {
+  box-shadow: inset 3px 0 0 var(--copper);
+}
+
+.result-card.out {
+  box-shadow: inset 3px 0 0 var(--muted);
+}
+
+.result-card.no {
+  box-shadow: inset 3px 0 0 var(--copper-dark);
+  cursor: default;
+}
+
+.verdict-counts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.verdict-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.verdict-panel h2 {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 900px) {
+  .verdict-grid,
+  .verdict-counts {
+    grid-template-columns: 1fr;
+  }
+}
+
+.result-code.word,
+.result-card.yes .result-code {
+  font-size: 22px;
+}
+
+.screen-next {
+  margin-top: 18px;
 }
 
 .result-code {

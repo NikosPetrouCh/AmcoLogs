@@ -10,17 +10,20 @@ namespace AmcoLogs.Web.Controllers;
 public sealed class LogsController : ControllerBase
 {
     private readonly ILogDownloadJob _job;
+    private readonly SshConnectionProbe _ping;
     private readonly INlogSaleLocator _locator;
     private readonly SaleInvestigation _investigation;
     private readonly IAmcoLogsStore _store;
 
     public LogsController(
         ILogDownloadJob job,
+        SshConnectionProbe ping,
         INlogSaleLocator locator,
         SaleInvestigation investigation,
         IAmcoLogsStore store)
     {
         _job = job;
+        _ping = ping;
         _locator = locator;
         _investigation = investigation;
         _store = store;
@@ -55,6 +58,27 @@ public sealed class LogsController : ControllerBase
         }
 
         return Accepted(_job.GetStatus());
+    }
+
+    [HttpPost("ping")]
+    public async Task<ActionResult<IReadOnlyList<SshPingResult>>> Ping(
+        [FromBody] SshPingRequest request,
+        CancellationToken cancellationToken)
+    {
+        var targets = (request.Devices ?? [])
+            .Where(device => !string.IsNullOrWhiteSpace(device.ServiceAccountId) && !string.IsNullOrWhiteSpace(device.IpAddress))
+            .Select(device => new SshPingTarget
+            {
+                ServiceAccountId = device.ServiceAccountId.Trim(),
+                IpAddress = device.IpAddress.Trim()
+            })
+            .ToList();
+        if (targets.Count == 0)
+        {
+            return BadRequest(new { message = "Δεν υπάρχει συσκευή με IP για ping." });
+        }
+
+        return Ok(await _ping.PingAsync(targets, cancellationToken));
     }
 
     [HttpPost("upload")]
@@ -217,6 +241,11 @@ public sealed class LogsController : ControllerBase
 public sealed class LogDownloadRequest
 {
     public List<LogDownloadDeviceRequest>? Devices { get; set; }
+}
+
+public sealed class SshPingRequest
+{
+    public List<SshPingTarget>? Devices { get; set; }
 }
 
 public sealed class ProcessLogsRequest

@@ -1,9 +1,23 @@
+using System.Text.RegularExpressions;
+
 namespace AmcoLogs.Core.Device;
 
 public static class DeviceCode
 {
     public const string FixedPrefix = "36";
     public const string MobilePrefix = "4";
+
+    private static readonly Regex CtvmCode = new(@"^CTVM\d{8}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    public static bool IsCtvmCode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        return CtvmCode.IsMatch(raw.Trim());
+    }
 
     public static string Digits(string? raw)
     {

@@ -30,6 +30,7 @@ builder.Services.AddSingleton(new DeviceAccessSettings
     LocalDownloadFolder = builder.Configuration["DeviceAccess:LocalDownloadFolder"]
 });
 builder.Services.AddSingleton<ILogDownloadJob, RemoteLogDownloader>();
+builder.Services.AddSingleton<SshConnectionProbe>();
 builder.Services.AddSingleton<INlogSaleLocator, NlogSaleLocator>();
 builder.Services.AddSingleton<SaleInvestigation>();
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>

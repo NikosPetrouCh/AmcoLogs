@@ -10,6 +10,7 @@ public sealed class StoredExcelRow
     public string? Rrn { get; init; }
     public decimal? Amount { get; init; }
     public string? EticketTransactionResult { get; init; }
+    public string? Decision { get; init; }
     public string? TransactionId { get; init; }
     public DateTime? TransactionDate { get; init; }
     public required string Mobility { get; init; }

@@ -91,6 +91,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
 
         await using var connection = new MySqlConnection(BuildConnectionString(settings, includeDatabase: true));
         await connection.OpenAsync(cancellationToken);
+        await EnsureSchemaAsync(connection, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await using (var batch = new MySqlCommand(
@@ -112,11 +113,11 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                 """
                 INSERT INTO excel_import_rows (
                     id, batch_id, row_number, service_account_id, rrn, amount,
-                    eticket_transaction_result, transaction_id, transaction_date,
+                    eticket_transaction_result, decision, transaction_id, transaction_date,
                     mobility, extra_json)
                 VALUES (
                     @id, @batchId, @rowNumber, @serviceAccountId, @rrn, @amount,
-                    @result, @transactionId, @transactionDate,
+                    @result, @decision, @transactionId, @transactionDate,
                     @mobility, @extraJson);
                 """, connection, transaction);
 
@@ -127,6 +128,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             insert.Parameters.AddWithValue("@rrn", (object?)row.Immediate.Rrn ?? DBNull.Value);
             insert.Parameters.AddWithValue("@amount", (object?)row.Immediate.Amount ?? DBNull.Value);
             insert.Parameters.AddWithValue("@result", (object?)row.Immediate.EticketTransactionResult ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@decision", (object?)row.Decision ?? DBNull.Value);
             insert.Parameters.AddWithValue("@transactionId", (object?)row.Immediate.TransactionId ?? DBNull.Value);
             insert.Parameters.AddWithValue("@transactionDate", (object?)row.Immediate.TransactionDate ?? DBNull.Value);
             insert.Parameters.AddWithValue("@mobility", row.Mobility.ToString());
@@ -259,10 +261,11 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         {
             await using var connection = new MySqlConnection(BuildConnectionString(settings, includeDatabase: true));
             await connection.OpenAsync(cancellationToken);
+            await EnsureSchemaAsync(connection, cancellationToken);
             await using var command = new MySqlCommand(
                 """
                 SELECT r.batch_id, b.file_name, b.imported_at, r.row_number,
-                       r.service_account_id, r.rrn, r.amount, r.eticket_transaction_result,
+                       r.service_account_id, r.rrn, r.amount, r.eticket_transaction_result, r.decision,
                        r.transaction_id, r.transaction_date, r.mobility, r.extra_json
                 FROM excel_import_rows r
                 INNER JOIN excel_import_batches b ON b.id = r.batch_id
@@ -285,6 +288,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                     Rrn = reader.IsDBNull(reader.GetOrdinal("rrn")) ? null : reader.GetString("rrn"),
                     Amount = reader.IsDBNull(reader.GetOrdinal("amount")) ? null : reader.GetDecimal("amount"),
                     EticketTransactionResult = reader.IsDBNull(reader.GetOrdinal("eticket_transaction_result")) ? null : reader.GetString("eticket_transaction_result"),
+                    Decision = reader.IsDBNull(reader.GetOrdinal("decision")) ? null : reader.GetString("decision"),
                     TransactionId = reader.IsDBNull(reader.GetOrdinal("transaction_id")) ? null : reader.GetString("transaction_id"),
                     TransactionDate = reader.IsDBNull(reader.GetOrdinal("transaction_date")) ? null : reader.GetDateTime("transaction_date"),
                     Mobility = reader.GetString("mobility"),
@@ -423,6 +427,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                 rrn VARCHAR(64) NULL,
                 amount DECIMAL(12,4) NULL,
                 eticket_transaction_result VARCHAR(128) NULL,
+                decision VARCHAR(8) NULL,
                 transaction_id VARCHAR(64) NULL,
                 transaction_date DATETIME(6) NULL,
                 mobility VARCHAR(16) NOT NULL,
@@ -497,6 +502,11 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         if (!await ColumnExistsAsync(connection, "excel_import_rows", "eticket_transaction_result", cancellationToken))
         {
             await ExecuteAsync(connection, "ALTER TABLE excel_import_rows ADD COLUMN eticket_transaction_result VARCHAR(128) NULL AFTER amount;", cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(connection, "excel_import_rows", "decision", cancellationToken))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE excel_import_rows ADD COLUMN decision VARCHAR(8) NULL AFTER eticket_transaction_result;", cancellationToken);
         }
 
         if (await ColumnExistsAsync(connection, "excel_import_rows", "terminal_number", cancellationToken))
