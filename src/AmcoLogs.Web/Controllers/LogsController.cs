@@ -11,6 +11,8 @@ public sealed class LogsController : ControllerBase
 {
     private readonly ILogDownloadJob _job;
     private readonly SshConnectionProbe _ping;
+    private readonly NlogSliceReader _slices;
+    private readonly DeviceAccessSettings _access;
     private readonly INlogSaleLocator _locator;
     private readonly SaleInvestigation _investigation;
     private readonly IAmcoLogsStore _store;
@@ -18,12 +20,16 @@ public sealed class LogsController : ControllerBase
     public LogsController(
         ILogDownloadJob job,
         SshConnectionProbe ping,
+        NlogSliceReader slices,
+        DeviceAccessSettings access,
         INlogSaleLocator locator,
         SaleInvestigation investigation,
         IAmcoLogsStore store)
     {
         _job = job;
         _ping = ping;
+        _slices = slices;
+        _access = access;
         _locator = locator;
         _investigation = investigation;
         _store = store;
@@ -124,6 +130,22 @@ public sealed class LogsController : ControllerBase
             localPath = path,
             fileName = name
         });
+    }
+
+    [HttpPost("slice")]
+    public ActionResult<LogSliceResult> Slice([FromBody] LogSliceRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Path) || string.IsNullOrWhiteSpace(request.TransactionId))
+        {
+            return BadRequest(new { message = "Χρειάζεται log και Transaction ID." });
+        }
+
+        if (!IsAllowedLogPath(request.Path))
+        {
+            return BadRequest(new { message = "Το log δεν είναι σε επιτρεπόμενο φάκελο." });
+        }
+
+        return Ok(_slices.Read(request.Path, request.TransactionId, request.TransactionDate));
     }
 
     [HttpPost("inspect")]
@@ -231,6 +253,38 @@ public sealed class LogsController : ControllerBase
         return NlogFile.OpenRead(temp);
     }
 
+    private bool IsAllowedLogPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        foreach (var root in AllowedLogRoots())
+        {
+            var folder = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (full.Equals(folder, StringComparison.OrdinalIgnoreCase)
+                || full.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private IEnumerable<string> AllowedLogRoots()
+    {
+        if (!string.IsNullOrWhiteSpace(_access.LocalDownloadFolder))
+        {
+            yield return _access.LocalDownloadFolder;
+        }
+
+        yield return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            "Nikos");
+        yield return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "AmcoLogs",
+            "uploads");
+    }
+
     private static string Sanitize(string value)
     {
         var invalid = Path.GetInvalidFileNameChars();
@@ -246,6 +300,13 @@ public sealed class LogDownloadRequest
 public sealed class SshPingRequest
 {
     public List<SshPingTarget>? Devices { get; set; }
+}
+
+public sealed class LogSliceRequest
+{
+    public string? Path { get; set; }
+    public string? TransactionId { get; set; }
+    public DateTime? TransactionDate { get; set; }
 }
 
 public sealed class ProcessLogsRequest

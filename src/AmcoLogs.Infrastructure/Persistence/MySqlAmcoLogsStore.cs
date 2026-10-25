@@ -138,12 +138,18 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
 
         await transaction.CommitAsync(cancellationToken);
 
+        var title = ExcelBatchTitle.Parse(import.FileName);
         return new SavedExcelImport
         {
             BatchId = batchId,
             FileName = import.FileName,
+            Title = title.Label,
+            FileDate = title.FileDate,
             ImportedAt = importedAt,
-            RowCount = import.Rows.Count
+            RowCount = import.Rows.Count,
+            YesCount = import.Rows.Count(row => row.Decision == TransactionScreen.Yes),
+            NoCount = import.Rows.Count(row => row.Decision == "NO"),
+            PendingCount = import.Rows.Count(row => row.Decision == TransactionScreen.Pending)
         };
     }
 
@@ -157,11 +163,17 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
 
         await using var connection = new MySqlConnection(BuildConnectionString(settings, includeDatabase: true));
         await connection.OpenAsync(cancellationToken);
+        await EnsureSchemaAsync(connection, cancellationToken);
         await using var command = new MySqlCommand(
             """
-            SELECT id, file_name, imported_at, row_count
-            FROM excel_import_batches
-            ORDER BY imported_at DESC
+            SELECT b.id, b.file_name, b.imported_at, b.row_count,
+                   COALESCE(SUM(r.decision = 'YES'), 0) AS yes_count,
+                   COALESCE(SUM(r.decision = 'NO'), 0) AS no_count,
+                   COALESCE(SUM(r.decision = 'PENDING'), 0) AS pending_count
+            FROM excel_import_batches b
+            LEFT JOIN excel_import_rows r ON r.batch_id = b.id
+            GROUP BY b.id, b.file_name, b.imported_at, b.row_count
+            ORDER BY b.imported_at DESC
             LIMIT @take;
             """, connection);
         command.Parameters.AddWithValue("@take", take);
@@ -170,13 +182,53 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
+            var fileName = reader.GetString("file_name");
+            var title = ExcelBatchTitle.Parse(fileName);
             results.Add(new SavedExcelImport
             {
                 BatchId = Guid.Parse(reader.GetString("id")),
-                FileName = reader.GetString("file_name"),
+                FileName = fileName,
+                Title = title.Label,
+                FileDate = title.FileDate,
                 ImportedAt = reader.GetDateTime("imported_at"),
-                RowCount = reader.GetInt32("row_count")
+                RowCount = reader.GetInt32("row_count"),
+                YesCount = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("yes_count"))),
+                NoCount = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("no_count"))),
+                PendingCount = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("pending_count")))
             });
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<StoredExcelRow>> ListBatchRowsAsync(Guid batchId, CancellationToken cancellationToken = default)
+    {
+        var settings = CurrentSettings();
+        if (settings is null)
+        {
+            return [];
+        }
+
+        await using var connection = new MySqlConnection(BuildConnectionString(settings, includeDatabase: true));
+        await connection.OpenAsync(cancellationToken);
+        await EnsureSchemaAsync(connection, cancellationToken);
+        await using var command = new MySqlCommand(
+            """
+            SELECT r.batch_id, b.file_name, b.imported_at, r.row_number,
+                   r.service_account_id, r.rrn, r.amount, r.eticket_transaction_result, r.decision,
+                   r.transaction_id, r.transaction_date, r.mobility, r.extra_json
+            FROM excel_import_rows r
+            INNER JOIN excel_import_batches b ON b.id = r.batch_id
+            WHERE r.batch_id = @batchId
+            ORDER BY r.row_number;
+            """, connection);
+        command.Parameters.AddWithValue("@batchId", batchId.ToString());
+
+        var results = new List<StoredExcelRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(ReadStoredRow(reader));
         }
 
         return results;
@@ -278,22 +330,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                results.Add(new StoredExcelRow
-                {
-                    BatchId = Guid.Parse(reader.GetString("batch_id")),
-                    FileName = reader.GetString("file_name"),
-                    ImportedAt = reader.GetDateTime("imported_at"),
-                    RowNumber = reader.GetInt32("row_number"),
-                    ServiceAccountId = reader.IsDBNull(reader.GetOrdinal("service_account_id")) ? null : reader.GetString("service_account_id"),
-                    Rrn = reader.IsDBNull(reader.GetOrdinal("rrn")) ? null : reader.GetString("rrn"),
-                    Amount = reader.IsDBNull(reader.GetOrdinal("amount")) ? null : reader.GetDecimal("amount"),
-                    EticketTransactionResult = reader.IsDBNull(reader.GetOrdinal("eticket_transaction_result")) ? null : reader.GetString("eticket_transaction_result"),
-                    Decision = reader.IsDBNull(reader.GetOrdinal("decision")) ? null : reader.GetString("decision"),
-                    TransactionId = reader.IsDBNull(reader.GetOrdinal("transaction_id")) ? null : reader.GetString("transaction_id"),
-                    TransactionDate = reader.IsDBNull(reader.GetOrdinal("transaction_date")) ? null : reader.GetDateTime("transaction_date"),
-                    Mobility = reader.GetString("mobility"),
-                    ExtraJson = reader.IsDBNull(reader.GetOrdinal("extra_json")) ? null : reader.GetString("extra_json")
-                });
+                results.Add(ReadStoredRow(reader));
             }
 
             return results;
@@ -303,6 +340,23 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             return [];
         }
     }
+
+    private static StoredExcelRow ReadStoredRow(MySqlDataReader reader) => new()
+    {
+        BatchId = Guid.Parse(reader.GetString("batch_id")),
+        FileName = reader.GetString("file_name"),
+        ImportedAt = reader.GetDateTime("imported_at"),
+        RowNumber = reader.GetInt32("row_number"),
+        ServiceAccountId = reader.IsDBNull(reader.GetOrdinal("service_account_id")) ? null : reader.GetString("service_account_id"),
+        Rrn = reader.IsDBNull(reader.GetOrdinal("rrn")) ? null : reader.GetString("rrn"),
+        Amount = reader.IsDBNull(reader.GetOrdinal("amount")) ? null : reader.GetDecimal("amount"),
+        EticketTransactionResult = reader.IsDBNull(reader.GetOrdinal("eticket_transaction_result")) ? null : reader.GetString("eticket_transaction_result"),
+        Decision = reader.IsDBNull(reader.GetOrdinal("decision")) ? null : reader.GetString("decision"),
+        TransactionId = reader.IsDBNull(reader.GetOrdinal("transaction_id")) ? null : reader.GetString("transaction_id"),
+        TransactionDate = reader.IsDBNull(reader.GetOrdinal("transaction_date")) ? null : reader.GetDateTime("transaction_date"),
+        Mobility = reader.GetString("mobility"),
+        ExtraJson = reader.IsDBNull(reader.GetOrdinal("extra_json")) ? null : reader.GetString("extra_json")
+    };
 
     public async Task SaveFindingsAsync(IReadOnlyList<InvestigationFinding> findings, CancellationToken cancellationToken = default)
     {

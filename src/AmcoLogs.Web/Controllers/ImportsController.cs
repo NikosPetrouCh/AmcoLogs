@@ -50,7 +50,7 @@ public sealed class ImportsController : ControllerBase
             }
             else
             {
-                saved = await _store.SaveImportAsync(TransactionScreen.WithoutExcluded(screened), cancellationToken);
+                saved = await _store.SaveImportAsync(TransactionScreen.ForStorage(screened), cancellationToken);
             }
         }
 
@@ -68,10 +68,16 @@ public sealed class ImportsController : ControllerBase
         return Ok(await _store.ListAllExcelRowsAsync(2000, cancellationToken));
     }
 
+    [HttpGet("{id:guid}/rows")]
+    public async Task<ActionResult<IReadOnlyList<StoredExcelRow>>> BatchRows(Guid id, CancellationToken cancellationToken)
+    {
+        return Ok(await _store.ListBatchRowsAsync(id, cancellationToken));
+    }
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<SavedExcelImport>>> Recent(CancellationToken cancellationToken)
     {
-        return Ok(await _store.ListRecentImportsAsync(20, cancellationToken));
+        return Ok(await _store.ListRecentImportsAsync(200, cancellationToken));
     }
 }
 

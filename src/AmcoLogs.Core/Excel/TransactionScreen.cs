@@ -19,6 +19,27 @@ public static class TransactionScreen
         };
     }
 
+    public const string Pending = "PENDING";
+
+    public static ExcelImportResult ForStorage(ExcelImportResult import)
+    {
+        var rows = import.Rows
+            .Where(row => row.Disposition is RowDisposition.AutomaticYes or RowDisposition.NeedsIp)
+            .Select(row => row.Disposition == RowDisposition.NeedsIp
+                ? row.WithScreen(RowDisposition.NeedsIp, Pending, row.ScreenReason ?? "Εκκρεμεί.")
+                : row)
+            .ToArray();
+
+        return new ExcelImportResult
+        {
+            FileName = import.FileName,
+            Rows = rows,
+            RecognizedHeaders = import.RecognizedHeaders,
+            ArchiveExtraHeaders = import.ArchiveExtraHeaders,
+            Warnings = import.Warnings
+        };
+    }
+
     public static ExcelImportResult WithoutExcluded(ExcelImportResult import)
     {
         return new ExcelImportResult

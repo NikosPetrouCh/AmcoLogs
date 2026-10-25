@@ -457,6 +457,11 @@ h1, h2 {
   cursor: default;
 }
 
+button.result-card {
+  cursor: pointer;
+  font: inherit;
+}
+
 .result-card.yes {
   box-shadow: inset 3px 0 0 var(--moss);
 }
@@ -682,6 +687,66 @@ th {
 .db-status.ok { color: var(--moss); }
 .db-status.bad, .db-status.pending { color: var(--muted); }
 .db-status.bad { color: #9f1239; }
+
+.case-list {
+  display: grid;
+  gap: 6px;
+}
+
+.case-open {
+  display: grid;
+  grid-template-columns: 160px minmax(180px, 1fr) 160px;
+  gap: 12px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.case-open.selected {
+  border-color: var(--ink);
+}
+
+.slice-miss {
+  color: #9f1239;
+  font-weight: 600;
+}
+
+.log-slice {
+  margin-top: 12px;
+}
+
+.slice-view {
+  max-height: 480px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #1d1914;
+  color: #f6f1e8;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.slice-line {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 12px;
+  padding: 1px 10px;
+}
+
+.slice-line.start,
+.slice-line.end {
+  background: #3d3120;
+  color: #f3d7a4;
+}
+
+.slice-no {
+  color: #a89880;
+}
 
 .hint {
   color: var(--muted);

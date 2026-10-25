@@ -10,6 +10,34 @@ const dbStatus = document.querySelector("#db-status");
 const dbDot = document.querySelector("#db-dot");
 const dbView = document.querySelector("#db-view");
 const dbBody = document.querySelector("#db-body");
+dbBody.addEventListener("click", (event) => {
+  const day = event.target.closest("[data-general-day]");
+  if (day) {
+    generalDay = day.dataset.generalDay;
+    generalBatchId = null;
+    renderExcelArchive();
+    return;
+  }
+  const batch = event.target.closest("[data-general-batch]");
+  if (batch) {
+    generalBatchId = batch.dataset.generalBatch;
+    renderExcelArchive();
+    return;
+  }
+  const back = event.target.closest("[data-general-back]");
+  if (back) {
+    if (back.dataset.generalBack === "days") {
+      generalDay = null;
+    }
+    generalBatchId = null;
+    renderExcelArchive();
+    return;
+  }
+  const resume = event.target.closest("[data-resume-batch]");
+  if (resume) {
+    resumeBatch(resume.dataset.resumeBatch);
+  }
+});
 const kicker = document.querySelector("#kicker");
 const stageTitle = document.querySelector("#stage-title");
 const stageLede = document.querySelector("#stage-lede");
@@ -58,7 +86,7 @@ const DB_COPY = {
   general: {
     kicker: "Database",
     title: "General",
-    lede: "Τα στοιχεία της συναλλαγής από το Excel: Transaction ID, RRN, Amount, ημερομηνία, κινητή/σταθερή."
+    lede: "Κάθε Excel μένει εδώ με τις γραμμές του πορίσματος. Διάλεξε ημέρα, μετά το αρχείο, και συνέχισε ό,τι εκκρεμεί."
   }
 };
 
@@ -69,6 +97,8 @@ let fileName = "";
 let devices = [];
 let reachedIps = false;
 let lastFindings = [];
+let generalDay = null;
+let generalBatchId = null;
 
 browse.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => {
@@ -165,7 +195,7 @@ function renderImport(payload) {
   lastFindings = [];
 
   const savedNote = payload.saved
-    ? `Αποθηκεύτηκαν ${payload.saved.rowCount} γραμμές στη MySQL. Οι εξαιρέσεις δεν γράφτηκαν.`
+    ? `Στο General: ${payload.saved.title}. ${payload.saved.yesCount} YES, ${payload.saved.pendingCount} εκκρεμεί.`
     : (payload.persistMessage || "Το αρχείο διαβάστηκε.");
   const warnings = (importData.warnings || []).join(" ");
   setStatus(savedNote + (warnings ? " " + warnings : ""));
@@ -463,26 +493,125 @@ async function saveManualCatalog(event) {
 }
 
 async function renderExcelArchive() {
-  const rows = await fetchJson("/api/imports/rows");
+  const batches = await fetchJson("/api/imports");
+  const dated = (Array.isArray(batches) ? batches : []).map((batch) => ({
+    ...batch,
+    day: formatFileDay(batch.fileDate)
+  }));
+  const days = [...new Set(dated.map((batch) => batch.day))];
+
+  if (!generalDay || !days.includes(generalDay)) {
+    generalDay = null;
+    generalBatchId = null;
+    dbBody.innerHTML = `
+      <h2>General</h2>
+      <p class="hint">${days.length ? "Διάλεξε ημέρα." : "Δεν υπάρχει ακόμα αρχείο. Χρειάζεται σύνδεση MySQL και ένα Excel."}</p>
+      <div class="categories">
+        ${days.map((day) => `
+          <button type="button" class="result-card" data-general-day="${escapeHtml(day)}">
+            <div class="result-code word">${escapeHtml(day)}</div>
+          </button>
+        `).join("")}
+      </div>
+    `;
+    return;
+  }
+
+  const files = dated.filter((batch) => batch.day === generalDay);
+  if (!generalBatchId || !files.some((batch) => batch.batchId === generalBatchId)) {
+    generalBatchId = null;
+    dbBody.innerHTML = `
+      <h2>${escapeHtml(generalDay)}</h2>
+      <div class="actions"><button type="button" data-general-back="days">Πίσω στις ημέρες</button></div>
+      <div class="categories">
+        ${files.map((file) => `
+          <button type="button" class="result-card" data-general-batch="${escapeHtml(file.batchId)}">
+            <strong>${escapeHtml(file.title)}</strong>
+            <p class="result-meta">YES ${file.yesCount} · NO ${file.noCount} · εκκρεμεί ${file.pendingCount}</p>
+          </button>
+        `).join("")}
+      </div>
+    `;
+    return;
+  }
+
+  const file = files.find((batch) => batch.batchId === generalBatchId);
+  const rows = await fetchJson(`/api/imports/${generalBatchId}/rows`);
   dbBody.innerHTML = `
-    <h2>General</h2>
-    <p class="hint">${rows.length ? `${rows.length} συναλλαγές από Excel.` : "Δεν υπάρχει ακόμα αρχείο Excel."}</p>
+    <h2>${escapeHtml(file.title)}</h2>
+    <p class="hint">${escapeHtml(file.fileName)}. Οι εξαιρέσεις δεν μπαίνουν εδώ.</p>
+    <div class="actions">
+      <button type="button" data-general-back="files">Πίσω στα αρχεία</button>
+      ${file.pendingCount ? `<button type="button" class="primary" data-resume-batch="${escapeHtml(file.batchId)}">Συνέχεια εκκρεμών</button>` : ""}
+    </div>
     ${renderTable(
-      ["File", "ServiceAccountID", "RRN", "Amount", "EticketTransactionResult", "TransactionID", "TransactionDate", "Type", "Extra", "Απόφαση"],
-      rows.map((row) => [
-        row.fileName,
+      ["ServiceAccountID", "Τύπος", "Amount", "TransactionID", "Ημερομηνία", "Κατάσταση"],
+      (Array.isArray(rows) ? rows : []).map((row) => [
         row.serviceAccountId || "",
-        row.rrn || "",
-        row.amount ?? "",
         row.eticketTransactionResult || "",
+        row.amount ?? "",
         row.transactionId || "",
         formatDate(row.transactionDate),
-        row.mobility,
-        row.extraJson || "",
-        row.decision || ""
+        statusLabel(row.decision)
       ])
     )}
   `;
+}
+
+function formatFileDay(value) {
+  if (!value) {
+    return "Χωρίς ημερομηνία";
+  }
+  const [year, month, day] = String(value).slice(0, 10).split("-");
+  if (!year || !month || !day) {
+    return String(value);
+  }
+  return `${day}/${month}/${year}`;
+}
+
+function statusLabel(decision) {
+  if (decision === "YES") return "YES";
+  if (decision === "NO") return "NO";
+  return "Εκκρεμεί";
+}
+
+async function resumeBatch(batchId) {
+  const rows = await fetchJson(`/api/imports/${batchId}/rows`);
+  const stored = Array.isArray(rows) ? rows : [];
+  if (!stored.length) {
+    return;
+  }
+  fileName = stored[0].fileName || "";
+  importedRows = stored.map(storedToWorkingRow);
+  currentView = "flow";
+  reachedIps = false;
+  lastFindings = [];
+  refreshDevices();
+  if (devices.length) {
+    await goToStep(2);
+    return;
+  }
+  currentStep = 4;
+  renderApp();
+}
+
+function storedToWorkingRow(row) {
+  const decided = row.decision === "YES" || row.decision === "NO";
+  return {
+    rowNumber: row.rowNumber,
+    mobility: row.mobility,
+    decision: decided ? row.decision : null,
+    disposition: row.decision === "YES" ? "AutomaticYes" : decided ? "Unclassified" : "NeedsIp",
+    screenReason: decided ? row.decision : "Εκκρεμεί.",
+    immediate: {
+      serviceAccountId: row.serviceAccountId,
+      rrn: row.rrn,
+      amount: row.amount,
+      eticketTransactionResult: row.eticketTransactionResult,
+      transactionId: row.transactionId,
+      transactionDate: row.transactionDate
+    }
+  };
 }
 
 async function fetchJson(url) {
@@ -671,11 +800,15 @@ function renderDownload() {
       </div>
     </div>
     ${other.length ? `<p class="hint">Άγνωστος τύπος: ${other.map((device) => device.serviceAccountId).join(", ")}</p>` : ""}
+    <h3 class="screen-next">Συναλλαγές στο log</h3>
+    <p class="hint">Κλικ σε μια συναλλαγή. Ανοίγει από το Selecting product μέχρι το επόμενο, με το Transaction ID και την ώρα του Excel.</p>
+    <div id="log-cases">${renderLogCases()}</div>
+    <section id="log-slice" class="log-slice" hidden></section>
     <pre id="dl-log" class="run-log"></pre>
     <div class="actions">
       <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>
       <button type="button" class="primary" id="start-download" onclick="startLogDownload()">Κατέβασμα με scp</button>
-      <button type="button" class="primary" id="to-process" ${hasAnyLog() ? "" : "disabled"} onclick="goToStep(4)">Συνέχεια στο πόρισμα</button>
+      <button type="button" class="primary" id="to-process" onclick="goToStep(4)">Συνέχεια στο πόρισμα</button>
     </div>
   `;
 }
@@ -819,10 +952,14 @@ function applyDownloadStatus(status) {
     }
   });
   setDlLog((status.log || []).join("\n"));
+  const cases = document.querySelector("#step-download #log-cases");
+  if (cases && !status.running) {
+    cases.innerHTML = renderLogCases();
+  }
   if (!status.running) {
     renderPipeline();
     const next = document.querySelector("#to-process");
-    if (next && hasAnyLog()) {
+    if (next) {
       next.disabled = false;
     }
   }
@@ -857,9 +994,91 @@ async function uploadManualLog(input) {
     device.localPath = payload.localPath;
     device.downloadStatus = "χειροκίνητα · " + payload.fileName;
   }
-  setDlLog("Το " + payload.fileName + " μπήκε χειροκίνητα για " + id + ".");
   renderDownload();
+  setDlLog("Το " + payload.fileName + " μπήκε χειροκίνητα για " + id + ".");
   renderPipeline();
+}
+
+function sameAccount(left, right) {
+  const a = String(left || "").trim().toUpperCase();
+  const b = String(right || "").trim().toUpperCase();
+  return a.length > 0 && a === b;
+}
+
+function renderLogCases() {
+  const ready = devices.filter((device) => device.localPath);
+  if (!ready.length) {
+    return `<p class="hint">Οι συναλλαγές ανοίγουν αφού κατέβει ή φορτωθεί το log.</p>`;
+  }
+
+  const buttons = [];
+  for (const device of ready) {
+    const rows = needsIpRows().filter((row) => sameAccount(row.immediate.serviceAccountId, device.serviceAccountId));
+    if (!rows.length) {
+      continue;
+    }
+    for (const row of rows) {
+      const id = row.immediate.transactionId || "";
+      buttons.push(`
+        <button type="button" class="case-open" data-tx="${escapeHtml(id)}" data-device="${escapeHtml(device.serviceAccountId)}" onclick="openLogSlice(this)" ${id ? "" : "disabled"}>
+          <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
+          <span class="mono">${escapeHtml(id || "χωρίς ID")}</span>
+          <span>${escapeHtml(formatDate(row.immediate.transactionDate))}</span>
+        </button>`);
+    }
+  }
+
+  if (!buttons.length) {
+    return `<p class="hint">Δεν υπάρχει εκκρεμής συναλλαγή για τα logs που φορτώθηκαν.</p>`;
+  }
+  return `<div class="case-list">${buttons.join("")}</div>`;
+}
+
+async function openLogSlice(button) {
+  const transactionId = button.dataset.tx || "";
+  const serviceAccountId = button.dataset.device || "";
+  const panel = document.querySelector("#step-download:not([hidden]) #log-slice, #step-process:not([hidden]) #log-slice");
+  if (!panel) {
+    return;
+  }
+  document.querySelectorAll(".case-open").forEach((item) => item.classList.remove("selected"));
+  button.classList.add("selected");
+  const device = devices.find((item) => sameAccount(item.serviceAccountId, serviceAccountId) && item.localPath);
+  const row = needsIpRows().find((item) =>
+    sameAccount(item.immediate.serviceAccountId, serviceAccountId)
+    && String(item.immediate.transactionId || "") === transactionId);
+  panel.hidden = false;
+  if (!device) {
+    panel.innerHTML = `<p class="slice-miss">Δεν υπάρχει log για αυτή τη συσκευή.</p>`;
+    return;
+  }
+  panel.innerHTML = `<p class="hint">Άνοιγμα ${escapeHtml(transactionId)}…</p>`;
+  const response = await fetch("/api/logs/slice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: device.localPath,
+      transactionId,
+      transactionDate: row?.immediate.transactionDate || null
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.found) {
+    panel.innerHTML = `
+      <h3 class="mono">${escapeHtml(transactionId)}</h3>
+      <p class="slice-miss">${escapeHtml(payload.message || "Δε βρέθηκε η συναλλαγή.")}</p>`;
+    return;
+  }
+  const lines = (payload.lines || []).map((line) => `
+    <div class="slice-line ${escapeHtml(line.role || "between")}">
+      <span class="slice-no">${escapeHtml(line.lineNumber)}</span>
+      <span class="slice-text">${escapeHtml(line.text || "")}</span>
+    </div>`).join("");
+  panel.innerHTML = `
+    <h3 class="mono">${escapeHtml(transactionId)}</h3>
+    <p class="hint">${escapeHtml(payload.logFileName || "")} · γραμμές ${escapeHtml(payload.lineStart)}–${escapeHtml(payload.lineEnd)}. ${escapeHtml(payload.message || "")}</p>
+    <div class="slice-view">${lines}</div>`;
+  panel.scrollIntoView({ block: "nearest" });
 }
 
 function renderProcess() {
@@ -904,6 +1123,9 @@ function renderProcess() {
           mobilityLabel(row.mobility)
         ])
       )}
+      <h3 class="screen-next">Άνοιγμα συναλλαγής στο log</h3>
+      <div id="log-cases">${renderLogCases()}</div>
+      <section id="log-slice" class="log-slice" hidden></section>
       <p class="hint" style="margin-top:16px;">Logs: ${logs.map((device) => device.serviceAccountId + " → " + (device.downloadStatus || device.localPath)).join(" · ") || "κανένα"}</p>
       <pre id="pr-log" class="run-log">${lastFindings.length ? "" : "Πάτα επεξεργασία για τα logs του τύπου 02."}</pre>
       <div id="pr-results">${lastFindings.length ? renderFindings(lastFindings) : ""}</div>
