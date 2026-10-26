@@ -7,29 +7,19 @@ namespace AmcoLogs.Infrastructure.Logs;
 
 public sealed class SshConnectionProbe
 {
-    public const int DirectPort = 8022;
-    public const int TunnelPort = 1030;
-
-    private readonly DeviceAccessSettings _settings;
-
-    public SshConnectionProbe(DeviceAccessSettings settings)
-    {
-        _settings = settings;
-    }
-
     public async Task<IReadOnlyList<SshPingResult>> PingAsync(
         IReadOnlyList<SshPingTarget> targets,
         CancellationToken cancellationToken = default)
     {
-        var ssh = FindSsh();
-        if (ssh is null)
+        var ping = FindPing();
+        if (ping is null)
         {
             return targets.Select(target => new SshPingResult
             {
                 ServiceAccountId = target.ServiceAccountId,
                 IpAddress = target.IpAddress.Trim(),
                 Reachable = false,
-                Message = "Δεν βρέθηκε το ssh.exe. Χρειάζεται OpenSSH Client."
+                Message = "Δεν βρέθηκε το ping.exe."
             }).ToArray();
         }
 
@@ -43,13 +33,13 @@ public sealed class SshConnectionProbe
             },
             async (index, token) =>
             {
-                results[index] = await Task.Run(() => ProbeOne(targets[index], ssh), token);
+                results[index] = await Task.Run(() => ProbeOne(targets[index], ping), token);
             });
 
         return results;
     }
 
-    private SshPingResult ProbeOne(SshPingTarget target, string ssh)
+    private SshPingResult ProbeOne(SshPingTarget target, string ping)
     {
         var ip = target.IpAddress.Trim();
         if (!IPAddress.TryParse(ip, out var address) || address.AddressFamily != AddressFamily.InterNetwork)
@@ -57,77 +47,45 @@ public sealed class SshConnectionProbe
             return Fail(target, ip, "Η IP δεν είναι έγκυρη διεύθυνση IPv4.");
         }
 
-        var user = string.IsNullOrWhiteSpace(_settings.Username) ? "amco" : _settings.Username.Trim();
-        if (user.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not '.' and not '_' and not '-'))
-        {
-            return Fail(target, ip, "Ο χρήστης SSH δεν είναι έγκυρος.");
-        }
-
-        var direct = TryPort(ssh, user, ip, DirectPort);
-        if (direct.Ok)
-        {
-            return new SshPingResult
-            {
-                ServiceAccountId = target.ServiceAccountId,
-                IpAddress = ip,
-                Reachable = true,
-                Path = "direct",
-                Port = DirectPort,
-                Message = $"ssh {user}@{ip} -p{DirectPort} · απευθείας"
-            };
-        }
-
-        var tunnel = TryPort(ssh, user, ip, TunnelPort);
-        if (tunnel.Ok)
-        {
-            return new SshPingResult
-            {
-                ServiceAccountId = target.ServiceAccountId,
-                IpAddress = ip,
-                Reachable = true,
-                Path = "tunnel",
-                Port = TunnelPort,
-                Message = $"ssh {user}@{ip} -p{DirectPort}: {direct.Detail}. ssh {user}@{ip} -p{TunnelPort} · tunnel"
-            };
-        }
-
-        return Fail(target, ip, $"ssh {user}@{ip} -p{DirectPort}: {direct.Detail}. ssh {user}@{ip} -p{TunnelPort}: {tunnel.Detail}");
-    }
-
-    private static PortAttempt TryPort(string ssh, string user, string ip, int port)
-    {
-        var arguments = $"{user}@{ip} -p{port} -o BatchMode=yes -o ConnectTimeout=8 -o NumberOfPasswordPrompts=0 exit";
+        var command = $"ping {ip}";
         try
         {
             using var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
-                FileName = ssh,
-                Arguments = arguments,
+                FileName = ping,
+                Arguments = ip,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
             process.Start();
-            if (!process.WaitForExit(12_000))
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(20_000))
             {
                 process.Kill(entireProcessTree: true);
-                return new PortAttempt(false, "timeout");
+                return Fail(target, ip, command + " · timeout");
             }
 
-            var error = process.StandardError.ReadToEnd().Trim();
             if (process.ExitCode == 0)
             {
-                return new PortAttempt(true, "σύνδεση");
+                return new SshPingResult
+                {
+                    ServiceAccountId = target.ServiceAccountId,
+                    IpAddress = ip,
+                    Reachable = true,
+                    Message = command
+                };
             }
 
-            var detail = string.IsNullOrWhiteSpace(error) ? $"exit {process.ExitCode}" : FirstLine(error);
-            return new PortAttempt(false, detail);
+            var detail = FirstLine(output.GetAwaiter().GetResult() + "\n" + error.GetAwaiter().GetResult());
+            return Fail(target, ip, string.IsNullOrWhiteSpace(detail) ? command : command + " · " + detail);
         }
         catch (Exception exception)
         {
-            return new PortAttempt(false, exception.Message);
+            return Fail(target, ip, command + " · " + exception.Message);
         }
     }
 
@@ -145,24 +103,9 @@ public sealed class SshConnectionProbe
         return line.Length > 240 ? line[..240] : line;
     }
 
-    private readonly record struct PortAttempt(bool Ok, string Detail);
-
-    private static string? FindSsh()
+    private static string? FindPing()
     {
-        var candidates = new[]
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "OpenSSH", "ssh.exe"),
-            "ssh"
-        };
-
-        foreach (var candidate in candidates)
-        {
-            if (candidate == "ssh" || File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
+        var ping = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "ping.exe");
+        return File.Exists(ping) ? ping : null;
     }
 }

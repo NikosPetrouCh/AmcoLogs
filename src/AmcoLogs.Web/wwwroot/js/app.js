@@ -647,7 +647,7 @@ function renderIps() {
 function renderDeviceRows() {
   return `
     <div class="device-row ip-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
-      <span>CTVM</span><span>Τύπος</span><span>IP</span><span>Όχημα</span><span>SSH</span>
+      <span>CTVM</span><span>Τύπος</span><span>IP</span><span>Όχημα</span><span>Ping</span>
     </div>
     ${devices.map((device) => `
       <div class="device-row ip-row">
@@ -730,7 +730,7 @@ async function pingDevices() {
     button.disabled = true;
     button.dataset.busy = "1";
   }
-  setIpLog("SSH ping: ssh amco@IP -p8022. Αν δεν ανοίξει, ξαναδοκιμάζει -p1030…");
+  setIpLog("ping και μετά η IP κάθε συσκευής…");
   const response = await fetch("/api/logs/ping", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -757,7 +757,7 @@ async function pingDevices() {
       continue;
     }
     device.pingReachable = result.reachable === true;
-    device.pingLabel = result.reachable ? (result.path === "tunnel" ? "tunnel" : "απευθείας") : "αποτυχία";
+    device.pingLabel = result.reachable ? "απάντησε" : "αποτυχία";
     device.pingPort = result.port || null;
   }
   const list = document.querySelector("#ip-devices");
