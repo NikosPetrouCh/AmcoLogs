@@ -73,7 +73,7 @@ public sealed class SshConnectionProbe
                 Reachable = true,
                 Path = "direct",
                 Port = DirectPort,
-                Message = $"ssh -p {DirectPort} {user}@{ip} exit · απευθείας"
+                Message = $"ssh {user}@{ip} -p{DirectPort} · απευθείας"
             };
         }
 
@@ -87,16 +87,16 @@ public sealed class SshConnectionProbe
                 Reachable = true,
                 Path = "tunnel",
                 Port = TunnelPort,
-                Message = $"απευθείας {DirectPort}: {direct.Detail}. ssh -p {TunnelPort} {user}@{ip} exit · tunnel"
+                Message = $"ssh {user}@{ip} -p{DirectPort}: {direct.Detail}. ssh {user}@{ip} -p{TunnelPort} · tunnel"
             };
         }
 
-        return Fail(target, ip, $"απευθείας {DirectPort}: {direct.Detail}. tunnel {TunnelPort}: {tunnel.Detail}");
+        return Fail(target, ip, $"ssh {user}@{ip} -p{DirectPort}: {direct.Detail}. ssh {user}@{ip} -p{TunnelPort}: {tunnel.Detail}");
     }
 
     private static PortAttempt TryPort(string ssh, string user, string ip, int port)
     {
-        var arguments = $"-p {port} -o BatchMode=yes -o ConnectTimeout=8 -o NumberOfPasswordPrompts=0 {user}@{ip} exit";
+        var arguments = $"{user}@{ip} -p{port} -o BatchMode=yes -o ConnectTimeout=8 -o NumberOfPasswordPrompts=0 exit";
         try
         {
             using var process = new Process();

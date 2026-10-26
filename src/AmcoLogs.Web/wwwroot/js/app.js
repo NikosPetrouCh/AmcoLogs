@@ -730,7 +730,7 @@ async function pingDevices() {
     button.disabled = true;
     button.dataset.busy = "1";
   }
-  setIpLog("SSH ping: πρώτα απευθείας 8022, αν αποτύχει tunnel 1030…");
+  setIpLog("SSH ping: ssh amco@IP -p8022. Αν δεν ανοίξει, ξαναδοκιμάζει -p1030…");
   const response = await fetch("/api/logs/ping", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
