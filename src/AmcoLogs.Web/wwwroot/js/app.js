@@ -780,15 +780,20 @@ function setIpLog(text) {
   }
 }
 
+function readyToDownload(device) {
+  return Boolean(device.ip) && device.pingReachable === true;
+}
+
 function renderDownload() {
-  const fixed = devices.filter((device) => device.mobility === "Fixed");
-  const mobile = devices.filter((device) => device.mobility === "Mobile");
-  const other = devices.filter((device) => device.mobility !== "Fixed" && device.mobility !== "Mobile");
-  const ready = devices.filter((device) => device.pingReachable === true && device.ip).length;
+  const readyDevices = devices.filter(readyToDownload);
+  const skippedDevices = devices.filter((device) => !readyToDownload(device));
+  const fixed = readyDevices.filter((device) => device.mobility === "Fixed");
+  const mobile = readyDevices.filter((device) => device.mobility === "Mobile");
+  const other = readyDevices.filter((device) => device.mobility !== "Fixed" && device.mobility !== "Mobile");
 
   dlBody.innerHTML = `
     <h2>Logs για τον τύπο 02 που μένει</h2>
-    <p class="hint">${ready} από ${devices.length} απάντησαν στο ping και θα κατέβουν. Σταθερά: scp του nlog. Κινητά: sudo zip nlog-all-ΗΜΕΡΑ.zip nlog-all-ΗΜΕΡΑ.log, scp του zip, και sudo rm του zip στη συσκευή. Όσες δεν απάντησαν μένουν για χειροκίνητο αρχείο.</p>
+    <p class="hint">Θα κατέβουν ${readyDevices.length} συσκευές με επιτυχές ping${skippedDevices.length ? `. ${skippedDevices.length} με αποτυχία ping δεν κατεβαίνουν` : ""}. Σταθερά: το nlog. Κινητά: ssh, cd /opt/amco/middleware/TVMserver, sudo zip, κατέβασμα του zip, sudo rm.</p>
     <div class="split">
       <div>
         <h3>Σταθερά</h3>
@@ -800,6 +805,7 @@ function renderDownload() {
       </div>
     </div>
     ${other.length ? `<p class="hint">Άγνωστος τύπος: ${other.map((device) => device.serviceAccountId).join(", ")}</p>` : ""}
+    ${skippedDevices.length ? `<h3>Δεν κατεβαίνουν</h3><p class="hint">Αποτυχία ping. Μπορείς να αφήσεις το αρχείο χειροκίνητα.</p>${deviceMiniList(skippedDevices)}` : ""}
     <h3 class="screen-next">Συναλλαγές στο log</h3>
     <p class="hint">Κλικ σε μια συναλλαγή. Ανοίγει από το Selecting product μέχρι το επόμενο, με το Transaction ID και την ώρα του Excel.</p>
     <div id="log-cases">${renderLogCases()}</div>
@@ -807,7 +813,7 @@ function renderDownload() {
     <pre id="dl-log" class="run-log"></pre>
     <div class="actions">
       <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>
-      <button type="button" class="primary" id="start-download" onclick="startLogDownload()" ${ready ? "" : "disabled"}>Κατέβασμα με scp</button>
+      <button type="button" class="primary" id="start-download" onclick="startLogDownload()" ${readyDevices.length ? "" : "disabled"}>Κατέβασμα με scp</button>
       <button type="button" class="primary" id="to-process" onclick="goToStep(4)">Συνέχεια στο πόρισμα</button>
     </div>
   `;
@@ -882,7 +888,7 @@ function pingDownloadLabel(device) {
 }
 
 async function startLogDownload() {
-  const target = devices.filter((device) => device.ip && device.pingReachable === true);
+  const target = devices.filter(readyToDownload);
   for (const device of devices) {
     if (target.includes(device)) {
       continue;
@@ -908,10 +914,9 @@ async function startLogDownload() {
       cell.textContent = device.downloadStatus || "—";
     }
   });
-  const skipped = devices.length - target.length;
   const fixedCount = target.filter((device) => device.mobility === "Fixed").length;
   const mobileCount = target.filter((device) => device.mobility === "Mobile").length;
-  setDlLog(`Κατέβασμα για ${target.length} συσκευές με επιτυχές ping: ${fixedCount} σταθερές, ${mobileCount} κινητές. Χωρίς νέο ping.${skipped ? ` ${skipped} χωρίς ping μένουν απέξω.` : ""}`);
+  setDlLog(`Κατέβασμα ${target.length} συσκευών με επιτυχές ping: ${fixedCount} σταθερές, ${mobileCount} κινητές.`);
   const response = await fetch("/api/logs/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

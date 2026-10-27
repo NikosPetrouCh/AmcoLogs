@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using AmcoLogs.Core.Logs;
 using Renci.SshNet;
 
@@ -57,7 +58,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         {
             var fixedCount = devices.Count(device => !IsMobile(device.Mobility));
             var mobileCount = devices.Count - fixedCount;
-            Log($"Κατέβασμα για {devices.Count} συσκευές με επιτυχές ping: {fixedCount} σταθερές, {mobileCount} κινητές. Χωρίς νέο ping.");
+            Log($"Κατέβασμα {devices.Count} συσκευών με επιτυχές ping: {fixedCount} σταθερές, {mobileCount} κινητές.");
             foreach (var device in devices)
             {
                 SetPhase($"{device.ServiceAccountId} {device.IpAddress}");
@@ -175,27 +176,31 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
 
     private void RunSudo(string ip, int port, string user, string remoteDir, string action, int timeoutMs)
     {
-        var script = $"cd {remoteDir} && {action}";
+        Log($"ssh -p {port} {user}@{ip}");
+        Log($"cd {remoteDir}");
+        Log($"sudo {action}");
         var password = _settings.Password ?? "";
-        var command = string.IsNullOrEmpty(password)
-            ? $"sudo sh -c \"{script}\""
-            : $"echo {QuoteShell(password)} | sudo -S -p '' sh -c \"{script}\"";
-        Log($"ssh -p {port} {user}@{ip} sudo -S sh -c \"{script}\"");
+        var sudo = string.IsNullOrEmpty(password)
+            ? $"sudo {action}"
+            : $"echo {QuoteShell(password)} | sudo -S -p '' {action}";
+        var line = $"cd {remoteDir} && {sudo}; echo AMCO_EXIT:$?";
         using var client = Open<SshClient>(ip, port, user);
         client.Connect();
         try
         {
-            using var cmd = client.CreateCommand(command);
-            cmd.CommandTimeout = TimeSpan.FromMilliseconds(timeoutMs);
-            var output = Redact((cmd.Execute() + "\n" + cmd.Error).Trim());
-            if (!string.IsNullOrWhiteSpace(output))
+            using var shell = client.CreateShellStream("vt100", 200, 50, 1024, 768, 8192);
+            shell.WriteLine(line);
+            var output = shell.Expect(new Regex(@"AMCO_EXIT:(\d+)"), TimeSpan.FromMilliseconds(timeoutMs));
+            var text = Redact(output ?? "");
+            if (!string.IsNullOrWhiteSpace(text))
             {
-                Log(output);
+                Log(text);
             }
 
-            if (cmd.ExitStatus != 0)
+            var exit = Regex.Match(text, @"AMCO_EXIT:(\d+)");
+            if (!exit.Success || exit.Groups[1].Value != "0")
             {
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(output) ? $"sudo exit {cmd.ExitStatus}" : output);
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(text) ? "Η εντολή στη συσκευή δεν ολοκληρώθηκε." : text);
             }
         }
         finally
