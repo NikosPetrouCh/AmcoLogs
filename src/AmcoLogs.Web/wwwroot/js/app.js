@@ -757,7 +757,7 @@ async function pingDevices() {
       continue;
     }
     device.pingReachable = result.reachable === true;
-    device.pingLabel = result.reachable ? "απάντησε" : "αποτυχία";
+    device.pingLabel = (result.reachable ? "απάντησε · " : "αποτυχία · ") + (result.message || "");
     device.pingPort = result.port || null;
   }
   const list = document.querySelector("#ip-devices");
@@ -767,7 +767,7 @@ async function pingDevices() {
   refreshPingButton();
   const ok = results.filter((item) => item.reachable).length;
   setIpLog([
-    `SSH ping: ${ok} από ${results.length} έχουν σύνδεση.`,
+    `ping: ${ok} από ${results.length} απάντησαν οι ίδιες.`,
     ...results.map((item) => item.message)
   ].join("\n"));
 }
@@ -909,7 +909,9 @@ async function startLogDownload() {
     }
   });
   const skipped = devices.length - target.length;
-  setDlLog(`Starting scp -P 8022 για ${target.length} συσκευές${skipped ? `. ${skipped} χωρίς ping μένουν απέξω.` : "."}`);
+  const fixedCount = target.filter((device) => device.mobility === "Fixed").length;
+  const mobileCount = target.filter((device) => device.mobility === "Mobile").length;
+  setDlLog(`Κατέβασμα για ${target.length} συσκευές με επιτυχές ping: ${fixedCount} σταθερές, ${mobileCount} κινητές. Χωρίς νέο ping.${skipped ? ` ${skipped} χωρίς ping μένουν απέξω.` : ""}`);
   const response = await fetch("/api/logs/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

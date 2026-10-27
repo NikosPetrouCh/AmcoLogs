@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using System.Globalization;
 using AmcoLogs.Core.Logs;
+using Renci.SshNet;
 
 namespace AmcoLogs.Infrastructure.Logs;
 
@@ -55,20 +55,13 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
     {
         try
         {
-            var scp = FindOpenSsh("scp.exe");
-            if (scp is null)
-            {
-                Log("scp not found. Install OpenSSH Client (scp.exe).");
-                SetPhase("Error");
-                return;
-            }
-
-            var ssh = devices.Any(device => IsMobile(device.Mobility)) ? FindOpenSsh("ssh.exe") : null;
-            Log("Using " + scp);
+            var fixedCount = devices.Count(device => !IsMobile(device.Mobility));
+            var mobileCount = devices.Count - fixedCount;
+            Log($"Κατέβασμα για {devices.Count} συσκευές με επιτυχές ping: {fixedCount} σταθερές, {mobileCount} κινητές. Χωρίς νέο ping.");
             foreach (var device in devices)
             {
                 SetPhase($"{device.ServiceAccountId} {device.IpAddress}");
-                var result = DownloadOne(device, scp, ssh);
+                var result = DownloadOne(device);
                 lock (_gate)
                 {
                     _results.Add(result);
@@ -92,7 +85,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         }
     }
 
-    private LogDownloadResult DownloadOne(LogDownloadDeviceRequest device, string scp, string? ssh)
+    private LogDownloadResult DownloadOne(LogDownloadDeviceRequest device)
     {
         var dates = NormalizeDates(device.LogDates);
         if (dates.Count == 0)
@@ -101,10 +94,9 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         }
 
         var mobile = IsMobile(device.Mobility);
-        if (mobile && ssh is null)
-        {
-            return Fail(device, "error", "ssh not found. Install OpenSSH Client (ssh.exe).");
-        }
+        Log(mobile
+            ? $"{device.ServiceAccountId}: κινητή, zip και κατέβασμα."
+            : $"{device.ServiceAccountId}: σταθερή, κατέβασμα του nlog.");
 
         var user = string.IsNullOrWhiteSpace(_settings.Username) ? "amco" : _settings.Username;
         var port = _settings.Port <= 0 ? 8022 : _settings.Port;
@@ -116,6 +108,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         Directory.CreateDirectory(destDir);
 
         var removeFailed = false;
+        var expected = new List<string>();
         try
         {
             foreach (var day in dates)
@@ -125,18 +118,20 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
                 var remoteName = logName;
                 if (mobile)
                 {
-                    var remoteCommand = $"cd {remoteDir} && sudo zip {zipName} {logName}";
-                    var sshCommand = $"-p {port} {user}@{device.IpAddress} {Quote(remoteCommand)}";
-                    Log($"ssh {sshCommand}");
-                    RunProcess(ssh!, sshCommand, 300_000, closeInput: true);
+                    RunSudo(device.IpAddress, port, user, remoteDir, $"zip {zipName} {logName}", 300_000);
                     remoteName = zipName;
                 }
 
                 var remoteFile = $"{remoteDir}/{remoteName}";
-                var command = $"-P {port} {user}@{device.IpAddress}:{remoteFile} {Quote(destDir)}";
-                Log($"scp {command}");
-                RunProcess(scp, command, 180_000, closeInput: false);
+                var localFile = Path.Combine(destDir, remoteName);
+                Log($"scp -P {port} {user}@{device.IpAddress}:{remoteFile} \"{destDir}\"");
+                DownloadFile(device.IpAddress, port, user, remoteFile, destDir, 180_000);
+                if (!File.Exists(localFile))
+                {
+                    throw new InvalidOperationException($"Το {remoteName} δεν εμφανίστηκε στο {destDir}.");
+                }
 
+                expected.Add(localFile);
                 if (!mobile)
                 {
                     continue;
@@ -144,10 +139,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
 
                 try
                 {
-                    var removeCommand = $"cd {remoteDir} && sudo rm {zipName}";
-                    var sshRemove = $"-p {port} {user}@{device.IpAddress} {Quote(removeCommand)}";
-                    Log($"ssh {sshRemove}");
-                    RunProcess(ssh!, sshRemove, 60_000, closeInput: true);
+                    RunSudo(device.IpAddress, port, user, remoteDir, $"rm {zipName}", 60_000);
                 }
                 catch (Exception exception)
                 {
@@ -156,10 +148,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
                 }
             }
 
-            var files = Directory.GetFiles(destDir, "nlog-all-*");
-            var message = files.Length > 0
-                ? $"Downloaded {files.Length} file(s) to {destDir}."
-                : "scp finished but no nlog file landed in the folder.";
+            var message = $"Downloaded {expected.Count} file(s) to {destDir}.";
             if (removeFailed)
             {
                 message += " Το zip έμεινε στη συσκευή γιατί το sudo rm απέτυχε.";
@@ -171,48 +160,101 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
                 IpAddress = device.IpAddress,
                 Mobility = device.Mobility,
                 Reachable = true,
-                Status = files.Length > 0 ? "downloaded" : "empty",
+                Status = expected.Count > 0 ? "downloaded" : "empty",
                 LocalPath = destDir,
                 Message = message
             };
         }
         catch (Exception exception)
         {
-            Log($"{device.ServiceAccountId}: {exception.Message}");
-            return Fail(device, "error", exception.Message);
+            var message = Redact(exception.Message);
+            Log($"{device.ServiceAccountId}: {message}");
+            return Fail(device, "error", message);
         }
     }
 
-    private static void RunProcess(string fileName, string arguments, int timeoutMs, bool closeInput)
+    private void RunSudo(string ip, int port, string user, string remoteDir, string action, int timeoutMs)
     {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo
+        var script = $"cd {remoteDir} && {action}";
+        var password = _settings.Password ?? "";
+        var command = string.IsNullOrEmpty(password)
+            ? $"sudo sh -c \"{script}\""
+            : $"echo {QuoteShell(password)} | sudo -S -p '' sh -c \"{script}\"";
+        Log($"ssh -p {port} {user}@{ip} sudo -S sh -c \"{script}\"");
+        using var client = Open<SshClient>(ip, port, user);
+        client.Connect();
+        try
         {
-            FileName = fileName,
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = closeInput,
-            UseShellExecute = false,
-            CreateNoWindow = true
+            using var cmd = client.CreateCommand(command);
+            cmd.CommandTimeout = TimeSpan.FromMilliseconds(timeoutMs);
+            var output = Redact((cmd.Execute() + "\n" + cmd.Error).Trim());
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                Log(output);
+            }
+
+            if (cmd.ExitStatus != 0)
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(output) ? $"sudo exit {cmd.ExitStatus}" : output);
+            }
+        }
+        finally
+        {
+            client.Disconnect();
+        }
+    }
+
+    private void DownloadFile(string ip, int port, string user, string remoteFile, string destDir, int timeoutMs)
+    {
+        using var client = Open<ScpClient>(ip, port, user);
+        client.OperationTimeout = TimeSpan.FromMilliseconds(timeoutMs);
+        client.Connect();
+        try
+        {
+            client.Download(remoteFile, new DirectoryInfo(destDir));
+        }
+        finally
+        {
+            client.Disconnect();
+        }
+    }
+
+    private T Open<T>(string ip, int port, string user) where T : BaseClient
+    {
+        var password = _settings.Password ?? "";
+        var keyboard = new KeyboardInteractiveAuthenticationMethod(user);
+        keyboard.AuthenticationPrompt += (_, args) =>
+        {
+            foreach (var prompt in args.Prompts)
+            {
+                prompt.Response = password;
+            }
         };
-        process.Start();
-        if (closeInput)
+        var connection = new ConnectionInfo(
+            ip,
+            port,
+            user,
+            new PasswordAuthenticationMethod(user, password),
+            keyboard)
         {
-            process.StandardInput.Close();
+            Timeout = TimeSpan.FromSeconds(20)
+        };
+        var client = (T)Activator.CreateInstance(typeof(T), connection)!;
+        client.HostKeyReceived += (_, args) => args.CanTrust = true;
+        return client;
+    }
+
+    private static string QuoteShell(string value) => "'" + value.Replace("'", "'\\''") + "'";
+
+    private string Redact(string text)
+    {
+        var password = _settings.Password;
+        if (string.IsNullOrEmpty(password) || string.IsNullOrEmpty(text))
+        {
+            return text;
         }
 
-        if (!process.WaitForExit(timeoutMs))
-        {
-            process.Kill(true);
-            throw new TimeoutException(Path.GetFileName(fileName) + " timed out.");
-        }
-
-        var error = process.StandardError.ReadToEnd();
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"{Path.GetFileName(fileName)} exit {process.ExitCode}" : error.Trim());
-        }
+        return text.Replace(password, "***", StringComparison.Ordinal);
     }
 
     private static bool IsMobile(string mobility) =>
@@ -231,26 +273,6 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
             "Amco files");
         Directory.CreateDirectory(folder);
         return folder;
-    }
-
-    private static string? FindOpenSsh(string fileName)
-    {
-        var bare = Path.GetFileNameWithoutExtension(fileName);
-        var candidates = new[]
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "OpenSSH", fileName),
-            bare
-        };
-
-        foreach (var candidate in candidates)
-        {
-            if (candidate == bare || File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
     }
 
     private static IReadOnlyList<string> NormalizeDates(IEnumerable<string>? dates)
@@ -283,8 +305,6 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         return new string(value.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
     }
 
-    private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
-
     private static LogDownloadResult Fail(LogDownloadDeviceRequest device, string status, string message) =>
         new()
         {
@@ -300,7 +320,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
     {
         lock (_gate)
         {
-            _log.Add($"{DateTime.Now:HH:mm:ss} {message}");
+            _log.Add($"{DateTime.Now:HH:mm:ss} {Redact(message)}");
             if (_log.Count > 120)
             {
                 _log.RemoveAt(0);

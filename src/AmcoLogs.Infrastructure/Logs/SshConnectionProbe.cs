@@ -47,41 +47,46 @@ public sealed class SshConnectionProbe
             return Fail(target, ip, "Η IP δεν είναι έγκυρη διεύθυνση IPv4.");
         }
 
-        var command = $"ping {ip}";
+        var command = $"ping -n 2 -w 1500 {ip}";
         try
         {
             using var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
                 FileName = ping,
-                Arguments = ip,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            process.StartInfo.ArgumentList.Add("-n");
+            process.StartInfo.ArgumentList.Add("2");
+            process.StartInfo.ArgumentList.Add("-w");
+            process.StartInfo.ArgumentList.Add("1500");
+            process.StartInfo.ArgumentList.Add(ip);
             process.Start();
-            var output = process.StandardOutput.ReadToEndAsync();
-            var error = process.StandardError.ReadToEndAsync();
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(20_000))
             {
                 process.Kill(entireProcessTree: true);
                 return Fail(target, ip, command + " · timeout");
             }
 
-            if (process.ExitCode == 0)
+            var text = outputTask.GetAwaiter().GetResult() + "\n" + errorTask.GetAwaiter().GetResult();
+            var reply = EchoReply(text, ip);
+            if (reply is not null)
             {
                 return new SshPingResult
                 {
                     ServiceAccountId = target.ServiceAccountId,
                     IpAddress = ip,
                     Reachable = true,
-                    Message = command
+                    Message = reply
                 };
             }
 
-            var detail = FirstLine(output.GetAwaiter().GetResult() + "\n" + error.GetAwaiter().GetResult());
-            return Fail(target, ip, string.IsNullOrWhiteSpace(detail) ? command : command + " · " + detail);
+            return Fail(target, ip, FailureDetail(text));
         }
         catch (Exception exception)
         {
@@ -97,11 +102,53 @@ public sealed class SshConnectionProbe
         Message = message
     };
 
-    private static string FirstLine(string value)
+    private static string? EchoReply(string text, string ip)
     {
-        var line = value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? value;
-        return line.Length > 240 ? line[..240] : line;
+        foreach (var line in Lines(text))
+        {
+            if (!line.Contains(ip, StringComparison.Ordinal) || !line.Contains("TTL", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (line.Contains("unreachable", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("failure", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (line.StartsWith("Reply from " + ip, StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Απάντηση από " + ip, StringComparison.OrdinalIgnoreCase))
+            {
+                return Trim(line);
+            }
+        }
+
+        return null;
     }
+
+    private static string FailureDetail(string text)
+    {
+        var lines = Lines(text);
+        var detail = lines.FirstOrDefault(line =>
+            line.Contains("unreachable", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("General failure", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("transmit failed", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("could not find host", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("έληξε", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("αποτυχ", StringComparison.OrdinalIgnoreCase));
+        return Trim(detail ?? lines.FirstOrDefault() ?? "Καμία απάντηση από τη συσκευή.");
+    }
+
+    private static List<string> Lines(string text) =>
+        text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .ToList();
+
+    private static string Trim(string value) => value.Length > 240 ? value[..240] : value;
 
     private static string? FindPing()
     {
