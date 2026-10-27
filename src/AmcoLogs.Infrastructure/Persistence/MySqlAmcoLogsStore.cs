@@ -112,7 +112,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             await using var insert = new MySqlCommand(
                 """
                 INSERT INTO excel_import_rows (
-                    id, batch_id, row_number, service_account_id, rrn, amount,
+                    id, batch_id, `row_number`, service_account_id, rrn, amount,
                     eticket_transaction_result, decision, transaction_id, transaction_date,
                     mobility, extra_json)
                 VALUES (
@@ -214,13 +214,13 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         await EnsureSchemaAsync(connection, cancellationToken);
         await using var command = new MySqlCommand(
             """
-            SELECT r.batch_id, b.file_name, b.imported_at, r.row_number,
+            SELECT r.batch_id, b.file_name, b.imported_at, r.`row_number`,
                    r.service_account_id, r.rrn, r.amount, r.eticket_transaction_result, r.decision,
                    r.transaction_id, r.transaction_date, r.mobility, r.extra_json
             FROM excel_import_rows r
             INNER JOIN excel_import_batches b ON b.id = r.batch_id
             WHERE r.batch_id = @batchId
-            ORDER BY r.row_number;
+            ORDER BY r.`row_number`;
             """, connection);
         command.Parameters.AddWithValue("@batchId", batchId.ToString());
 
@@ -316,12 +316,12 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             await EnsureSchemaAsync(connection, cancellationToken);
             await using var command = new MySqlCommand(
                 """
-                SELECT r.batch_id, b.file_name, b.imported_at, r.row_number,
+                SELECT r.batch_id, b.file_name, b.imported_at, r.`row_number`,
                        r.service_account_id, r.rrn, r.amount, r.eticket_transaction_result, r.decision,
                        r.transaction_id, r.transaction_date, r.mobility, r.extra_json
                 FROM excel_import_rows r
                 INNER JOIN excel_import_batches b ON b.id = r.batch_id
-                ORDER BY b.imported_at DESC, r.row_number
+                ORDER BY b.imported_at DESC, r.`row_number`
                 LIMIT @take;
                 """, connection);
             command.Parameters.AddWithValue("@take", take);
@@ -476,7 +476,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             CREATE TABLE IF NOT EXISTS excel_import_rows (
                 id CHAR(36) NOT NULL PRIMARY KEY,
                 batch_id CHAR(36) NOT NULL,
-                row_number INT NOT NULL,
+                `row_number` INT NOT NULL,
                 service_account_id VARCHAR(64) NULL,
                 rrn VARCHAR(64) NULL,
                 amount DECIMAL(12,4) NULL,

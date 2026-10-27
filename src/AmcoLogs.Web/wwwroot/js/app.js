@@ -63,7 +63,7 @@ const STEP_COPY = {
   3: {
     kicker: "Βήμα 3 από 4",
     title: "Logs",
-    lede: "Κατέβασμα μόνο για συσκευές που απάντησαν στο ping. Σταθερά έρχεται το nlog. Κινητά κάνουν sudo zip και κατεβαίνει το zip, στο Desktop\\Amco files."
+    lede: "Κατέβασμα μόνο για συσκευές που απάντησαν στο ping. Σταθερά έρχεται το nlog. Κινητά κάνουν sudo zip και κατεβαίνει το zip, στο Desktop\\Amco files\\κωδικός συσκευής."
   },
   4: {
     kicker: "Βήμα 4 από 4",
@@ -793,7 +793,7 @@ function renderDownload() {
 
   dlBody.innerHTML = `
     <h2>Logs για τον τύπο 02 που μένει</h2>
-    <p class="hint">Θα κατέβουν ${readyDevices.length} συσκευές με επιτυχές ping${skippedDevices.length ? `. ${skippedDevices.length} με αποτυχία ping δεν κατεβαίνουν` : ""}. Σταθερά: το nlog. Κινητά: ssh, cd /opt/amco/middleware/TVMserver, sudo zip, κατέβασμα του zip, sudo rm.</p>
+    <p class="hint">Θα κατέβουν ${readyDevices.length} συσκευές με επιτυχές ping${skippedDevices.length ? `. ${skippedDevices.length} με αποτυχία ping δεν κατεβαίνουν` : ""}. Σταθερά: το nlog. Κινητά: ssh, cd /opt/amco/middleware/TVMserver, sudo zip, κατέβασμα του zip, sudo rm. Φάκελος: Desktop\\Amco files\\κωδικός συσκευής.</p>
     <div class="split">
       <div>
         <h3>Σταθερά</h3>
