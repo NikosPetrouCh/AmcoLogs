@@ -5,6 +5,7 @@ public sealed class LogDownloadDeviceRequest
     public required string ServiceAccountId { get; init; }
     public required string Mobility { get; init; }
     public required string IpAddress { get; init; }
+    public bool PingReachable { get; init; }
     public List<string> LogDates { get; init; } = [];
 }
 

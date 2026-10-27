@@ -55,7 +55,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
     {
         try
         {
-            var scp = FindScp();
+            var scp = FindOpenSsh("scp.exe");
             if (scp is null)
             {
                 Log("scp not found. Install OpenSSH Client (scp.exe).");
@@ -63,11 +63,12 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
                 return;
             }
 
+            var ssh = devices.Any(device => IsMobile(device.Mobility)) ? FindOpenSsh("ssh.exe") : null;
             Log("Using " + scp);
             foreach (var device in devices)
             {
                 SetPhase($"{device.ServiceAccountId} {device.IpAddress}");
-                var result = DownloadOne(device, scp);
+                var result = DownloadOne(device, scp, ssh);
                 lock (_gate)
                 {
                     _results.Add(result);
@@ -91,7 +92,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         }
     }
 
-    private LogDownloadResult DownloadOne(LogDownloadDeviceRequest device, string scp)
+    private LogDownloadResult DownloadOne(LogDownloadDeviceRequest device, string scp, string? ssh)
     {
         var dates = NormalizeDates(device.LogDates);
         if (dates.Count == 0)
@@ -99,8 +100,14 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
             return Fail(device, "no-dates", "No TransactionDate in the Excel for this device.");
         }
 
+        var mobile = IsMobile(device.Mobility);
+        if (mobile && ssh is null)
+        {
+            return Fail(device, "error", "ssh not found. Install OpenSSH Client (ssh.exe).");
+        }
+
         var user = string.IsNullOrWhiteSpace(_settings.Username) ? "amco" : _settings.Username;
-        var port = _settings.Port <= 0 ? 1030 : _settings.Port;
+        var port = _settings.Port <= 0 ? 8022 : _settings.Port;
         var remoteDir = string.IsNullOrWhiteSpace(_settings.RemoteLogPath)
             ? "/opt/amco/middleware/TVMserver"
             : _settings.RemoteLogPath.TrimEnd('/');
@@ -108,18 +115,56 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         var destDir = Path.Combine(destRoot, Sanitize(device.ServiceAccountId));
         Directory.CreateDirectory(destDir);
 
+        var removeFailed = false;
         try
         {
             foreach (var day in dates)
             {
-                var remoteFile = $"{remoteDir}/nlog-all-{day}.log";
-                var destArg = destDir.TrimEnd('\\') + "\\";
-                var command = $"-P {port} {user}@{device.IpAddress}:{remoteFile} {Quote(destArg)}";
+                var logName = $"nlog-all-{day}.log";
+                var zipName = $"nlog-all-{day}.zip";
+                var remoteName = logName;
+                if (mobile)
+                {
+                    var remoteCommand = $"cd {remoteDir} && sudo zip {zipName} {logName}";
+                    var sshCommand = $"-p {port} {user}@{device.IpAddress} {Quote(remoteCommand)}";
+                    Log($"ssh {sshCommand}");
+                    RunProcess(ssh!, sshCommand, 300_000, closeInput: true);
+                    remoteName = zipName;
+                }
+
+                var remoteFile = $"{remoteDir}/{remoteName}";
+                var command = $"-P {port} {user}@{device.IpAddress}:{remoteFile} {Quote(destDir)}";
                 Log($"scp {command}");
-                RunScp(scp, command);
+                RunProcess(scp, command, 180_000, closeInput: false);
+
+                if (!mobile)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var removeCommand = $"cd {remoteDir} && sudo rm {zipName}";
+                    var sshRemove = $"-p {port} {user}@{device.IpAddress} {Quote(removeCommand)}";
+                    Log($"ssh {sshRemove}");
+                    RunProcess(ssh!, sshRemove, 60_000, closeInput: true);
+                }
+                catch (Exception exception)
+                {
+                    removeFailed = true;
+                    Log($"{device.ServiceAccountId}: το zip κατέβηκε, το sudo rm απέτυχε: {exception.Message}");
+                }
             }
 
             var files = Directory.GetFiles(destDir, "nlog-all-*");
+            var message = files.Length > 0
+                ? $"Downloaded {files.Length} file(s) to {destDir}."
+                : "scp finished but no nlog file landed in the folder.";
+            if (removeFailed)
+            {
+                message += " Το zip έμεινε στη συσκευή γιατί το sudo rm απέτυχε.";
+            }
+
             return new LogDownloadResult
             {
                 ServiceAccountId = device.ServiceAccountId,
@@ -128,9 +173,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
                 Reachable = true,
                 Status = files.Length > 0 ? "downloaded" : "empty",
                 LocalPath = destDir,
-                Message = files.Length > 0
-                    ? $"Downloaded {files.Length} file(s) to {destDir}."
-                    : "scp finished but no nlog file landed in the folder."
+                Message = message
             };
         }
         catch (Exception exception)
@@ -140,31 +183,40 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
         }
     }
 
-    private void RunScp(string scp, string arguments)
+    private static void RunProcess(string fileName, string arguments, int timeoutMs, bool closeInput)
     {
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
         {
-            FileName = scp,
+            FileName = fileName,
             Arguments = arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = closeInput,
             UseShellExecute = false,
             CreateNoWindow = true
         };
         process.Start();
-        if (!process.WaitForExit(180_000))
+        if (closeInput)
+        {
+            process.StandardInput.Close();
+        }
+
+        if (!process.WaitForExit(timeoutMs))
         {
             process.Kill(true);
-            throw new TimeoutException("scp timed out.");
+            throw new TimeoutException(Path.GetFileName(fileName) + " timed out.");
         }
 
         var error = process.StandardError.ReadToEnd();
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"scp exit {process.ExitCode}" : error.Trim());
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"{Path.GetFileName(fileName)} exit {process.ExitCode}" : error.Trim());
         }
     }
+
+    private static bool IsMobile(string mobility) =>
+        string.Equals(mobility, "Mobile", StringComparison.OrdinalIgnoreCase);
 
     private string ResolveLocalFolder()
     {
@@ -176,22 +228,23 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
 
         var folder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            "Nikos");
+            "Amco files");
         Directory.CreateDirectory(folder);
         return folder;
     }
 
-    private static string? FindScp()
+    private static string? FindOpenSsh(string fileName)
     {
+        var bare = Path.GetFileNameWithoutExtension(fileName);
         var candidates = new[]
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "OpenSSH", "scp.exe"),
-            "scp"
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "OpenSSH", fileName),
+            bare
         };
 
         foreach (var candidate in candidates)
         {
-            if (candidate == "scp" || File.Exists(candidate))
+            if (candidate == bare || File.Exists(candidate))
             {
                 return candidate;
             }

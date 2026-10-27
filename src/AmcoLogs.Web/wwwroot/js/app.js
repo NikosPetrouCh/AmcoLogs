@@ -63,7 +63,7 @@ const STEP_COPY = {
   3: {
     kicker: "Βήμα 3 από 4",
     title: "Logs",
-    lede: "Κατέβασμα με scp -P 1030 amco@IP:/opt/amco/middleware/TVMserver/nlog-all-ΗΜΕΡΟΜΗΝΙΑ.log στο Desktop\\Nikos. Αν αποτύχει, άσε το log μόνος σου."
+    lede: "Κατέβασμα μόνο για συσκευές που απάντησαν στο ping. Σταθερά έρχεται το nlog. Κινητά κάνουν sudo zip και κατεβαίνει το zip, στο Desktop\\Amco files."
   },
   4: {
     kicker: "Βήμα 4 από 4",
@@ -784,11 +784,11 @@ function renderDownload() {
   const fixed = devices.filter((device) => device.mobility === "Fixed");
   const mobile = devices.filter((device) => device.mobility === "Mobile");
   const other = devices.filter((device) => device.mobility !== "Fixed" && device.mobility !== "Mobile");
-  const ready = devices.filter((device) => device.ip).length;
+  const ready = devices.filter((device) => device.pingReachable === true && device.ip).length;
 
   dlBody.innerHTML = `
     <h2>Logs για τον τύπο 02 που μένει</h2>
-    <p class="hint">${ready} από ${devices.length} έχουν IP. Κατέβασμα: scp -P 1030 amco@IP:/opt/amco/middleware/TVMserver/nlog-all-ΗΜΕΡΟΜΗΝΙΑ.log στο Desktop\\Nikos\\ΣΥΣΚΕΥΗ. Αν αποτύχει, διάλεξε το nlog στη συσκευή.</p>
+    <p class="hint">${ready} από ${devices.length} απάντησαν στο ping και θα κατέβουν. Σταθερά: scp του nlog. Κινητά: sudo zip nlog-all-ΗΜΕΡΑ.zip nlog-all-ΗΜΕΡΑ.log, scp του zip, και sudo rm του zip στη συσκευή. Όσες δεν απάντησαν μένουν για χειροκίνητο αρχείο.</p>
     <div class="split">
       <div>
         <h3>Σταθερά</h3>
@@ -807,7 +807,7 @@ function renderDownload() {
     <pre id="dl-log" class="run-log"></pre>
     <div class="actions">
       <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>
-      <button type="button" class="primary" id="start-download" onclick="startLogDownload()">Κατέβασμα με scp</button>
+      <button type="button" class="primary" id="start-download" onclick="startLogDownload()" ${ready ? "" : "disabled"}>Κατέβασμα με scp</button>
       <button type="button" class="primary" id="to-process" onclick="goToStep(4)">Συνέχεια στο πόρισμα</button>
     </div>
   `;
@@ -820,7 +820,7 @@ function deviceMiniList(list) {
   return `<div class="device-list">${list.map((device) => `
     <div class="device-row dl-row">
       <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
-      <span>${mobilityLabel(device.mobility)} · ${(device.logDates || []).join(", ") || "χωρίς ημερομηνία"}</span>
+      <span>${mobilityLabel(device.mobility)}${device.mobility === "Mobile" ? " · zip" : ""} · ${(device.logDates || []).join(", ") || "χωρίς ημερομηνία"} · ${escapeHtml(pingDownloadLabel(device))}</span>
       <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="IP" onchange="saveDeviceMapping(this)">
       <label class="log-drop">Drop / επιλογή nlog
         <input type="file" accept=".log,.zip,.txt" data-id="${escapeHtml(device.serviceAccountId)}" onchange="uploadManualLog(this)">
@@ -871,17 +871,45 @@ async function saveDeviceMapping(input) {
   }
 }
 
+function pingDownloadLabel(device) {
+  if (device.pingReachable === true) {
+    return "ping ok";
+  }
+  if (device.pingReachable === false) {
+    return "ping αποτυχία";
+  }
+  return "χωρίς ping";
+}
+
 async function startLogDownload() {
-  const target = devices.filter((device) => device.ip);
+  const target = devices.filter((device) => device.ip && device.pingReachable === true);
+  for (const device of devices) {
+    if (target.includes(device)) {
+      continue;
+    }
+    device.downloadStatus = device.pingReachable === false
+      ? "ping αποτυχία — δεν κατεβαίνει"
+      : "χωρίς επιτυχές ping — δεν κατεβαίνει";
+  }
   if (!target.length) {
-    setDlLog("Write at least one IP first.");
+    renderDownload();
+    setDlLog("Το κατέβασμα γίνεται μόνο για συσκευές που απάντησαν στο ping.");
     return;
   }
   const button = document.querySelector("#start-download");
   if (button) {
     button.disabled = true;
   }
-  setDlLog("Starting scp -P 1030…");
+  document.querySelectorAll(".dl-row").forEach((row) => {
+    const id = row.querySelector(".ip-edit")?.dataset.id;
+    const device = devices.find((item) => item.serviceAccountId === id);
+    const cell = row.querySelector(".dl-status");
+    if (device && cell) {
+      cell.textContent = device.downloadStatus || "—";
+    }
+  });
+  const skipped = devices.length - target.length;
+  setDlLog(`Starting scp -P 8022 για ${target.length} συσκευές${skipped ? `. ${skipped} χωρίς ping μένουν απέξω.` : "."}`);
   const response = await fetch("/api/logs/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -890,6 +918,7 @@ async function startLogDownload() {
         serviceAccountId: device.serviceAccountId,
         mobility: device.mobility,
         ipAddress: device.ip,
+        pingReachable: true,
         logDates: device.logDates || []
       }))
     })
@@ -1213,6 +1242,8 @@ function refreshDevices() {
       busNo: prior?.busNo || null,
       localPath: prior?.localPath || null,
       downloadStatus: prior?.downloadStatus || null,
+      pingReachable: prior?.pingReachable ?? null,
+      pingLabel: prior?.pingLabel || "",
       logDates: []
     };
     current.transactions += 1;

@@ -25,7 +25,7 @@ builder.Services.AddSingleton(new DeviceAccessSettings
 {
     Username = builder.Configuration["DeviceAccess:Username"] ?? "amco",
     Password = builder.Configuration["DeviceAccess:Password"],
-    Port = int.TryParse(builder.Configuration["DeviceAccess:Port"], out var port) ? port : 1030,
+    Port = int.TryParse(builder.Configuration["DeviceAccess:Port"], out var port) ? port : 8022,
     RemoteLogPath = builder.Configuration["DeviceAccess:RemoteLogPath"] ?? "/opt/amco/middleware/TVMserver",
     LocalDownloadFolder = builder.Configuration["DeviceAccess:LocalDownloadFolder"]
 });

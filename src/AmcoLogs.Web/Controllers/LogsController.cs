@@ -50,11 +50,11 @@ public sealed class LogsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var devices = (request.Devices ?? [])
-            .Where(device => !string.IsNullOrWhiteSpace(device.IpAddress))
+            .Where(device => device.PingReachable && !string.IsNullOrWhiteSpace(device.IpAddress))
             .ToList();
         if (devices.Count == 0)
         {
-            return BadRequest(new { message = "No devices with an IP address." });
+            return BadRequest(new { message = "Κατέβασμα μόνο για συσκευές που απάντησαν στο ping." });
         }
 
         var started = await _job.StartAsync(devices, cancellationToken);
@@ -278,7 +278,7 @@ public sealed class LogsController : ControllerBase
 
         yield return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            "Nikos");
+            "Amco files");
         yield return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "AmcoLogs",
