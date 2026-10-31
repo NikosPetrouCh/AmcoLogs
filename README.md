@@ -146,3 +146,5 @@ src/AmcoLogs.Web             API + wwwroot (vanilla JS, όχι React)
 | GET | `/api/logs/findings` | Error reports |
 | GET | `/api/devices` | CTVM IPs |
 | GET | `/api/imports/rows` | General |
+
+Ο Άρης ειναι μάγκας
