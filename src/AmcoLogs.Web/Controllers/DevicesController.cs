@@ -102,7 +102,38 @@ public sealed class DevicesController : ControllerBase
                 : "Kept for this session. Connect MySQL under Database to store it."
         });
     }
+    [HttpPost("import-json")]
+    public async Task<ActionResult<DeviceIpImportResult>> ImportJson(
+    CancellationToken cancellationToken)
+    {
+        var status = await _store.GetStatusAsync(cancellationToken);
 
+        if (!status.Connected)
+        {
+            return Conflict(new
+            {
+                message = "Δεν υπάρχει ενεργή σύνδεση MySQL."
+            });
+        }
+
+        var mappings = _catalog.All()
+            .Select(hit => new DeviceIpMapping
+            {
+                ServiceAccountId = hit.ServiceAccountId,
+                IpAddress = hit.IpAddress,
+                BusNo = hit.BusNo,
+                Mobility = hit.Mobility,
+                Source = hit.Source,
+                UpdatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        var result = await _store.ImportDeviceIpsAsync(
+            mappings,
+            cancellationToken);
+
+        return Ok(result);
+    }
     private async Task<bool> TryPersistAsync(DeviceIpMapping mapping, CancellationToken cancellationToken)
     {
         try

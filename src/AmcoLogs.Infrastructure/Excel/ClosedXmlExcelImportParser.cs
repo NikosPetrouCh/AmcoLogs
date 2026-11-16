@@ -161,6 +161,7 @@ public sealed class ClosedXmlExcelImportParser : IExcelImportParser
     private static DateTime? ReadDate(IXLRow row, int column)
     {
         var cell = row.Cell(column);
+
         if (cell.IsEmpty())
         {
             return null;
@@ -172,12 +173,31 @@ public sealed class ClosedXmlExcelImportParser : IExcelImportParser
         }
 
         var text = cell.GetFormattedString().Trim();
-        if (DateTime.TryParse(text, CultureInfo.GetCultureInfo("el-GR"), DateTimeStyles.None, out var greek))
+
+        if (DateTime.TryParseExact(
+            text,
+            "yyyyMMddHHmmss",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var compactDate))
+        {
+            return compactDate;
+        }
+
+        if (DateTime.TryParse(
+            text,
+            CultureInfo.GetCultureInfo("el-GR"),
+            DateTimeStyles.None,
+            out var greek))
         {
             return greek;
         }
 
-        if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var invariant))
+        if (DateTime.TryParse(
+            text,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var invariant))
         {
             return invariant;
         }

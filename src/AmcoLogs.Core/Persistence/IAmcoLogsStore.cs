@@ -15,4 +15,5 @@ public interface IAmcoLogsStore
     Task UpsertDeviceIpAsync(DeviceIpMapping mapping, CancellationToken cancellationToken = default);
     Task SaveFindingsAsync(IReadOnlyList<InvestigationFinding> findings, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<InvestigationFinding>> ListFindingsAsync(int take = 500, CancellationToken cancellationToken = default);
+    Task<DeviceIpImportResult> ImportDeviceIpsAsync(IReadOnlyList<DeviceIpMapping> mappings, CancellationToken cancellationToken = default);
 }

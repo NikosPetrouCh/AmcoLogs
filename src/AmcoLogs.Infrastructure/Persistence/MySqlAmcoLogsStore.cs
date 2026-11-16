@@ -301,6 +301,101 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+
+    public async Task<DeviceIpImportResult> ImportDeviceIpsAsync(
+    IReadOnlyList<DeviceIpMapping> mappings,
+    CancellationToken cancellationToken = default)
+    {
+        var settings = RequireSettings();
+
+        var inserted = 0;
+        var updated = 0;
+        var skippedManual = 0;
+
+        await using var connection = new MySqlConnection(
+            BuildConnectionString(settings, includeDatabase: true));
+
+        await connection.OpenAsync(cancellationToken);
+
+        await EnsureSchemaAsync(connection, cancellationToken);
+
+        await using var transaction =
+            await connection.BeginTransactionAsync(cancellationToken);
+
+        foreach (var mapping in mappings)
+        {
+            // Ελέγχουμε αν υπάρχει ήδη το CTVM και ποια είναι η πηγή του.
+            await using var checkCommand = new MySqlCommand(
+                """
+            SELECT source
+            FROM device_ip_mappings
+            WHERE service_account_id = @id
+            FOR UPDATE;
+            """,
+                connection,
+                transaction);
+
+            checkCommand.Parameters.AddWithValue(
+                "@id", mapping.ServiceAccountId);
+
+            var existingSource = await checkCommand.ExecuteScalarAsync(
+                cancellationToken);
+
+            // Δεν αγγίζουμε τις χειροκίνητες εγγραφές.
+            if (string.Equals(
+                Convert.ToString(existingSource),
+                "manual",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                skippedManual++;
+                continue;
+            }
+
+            if (existingSource is null || existingSource == DBNull.Value)
+                inserted++;
+            else
+                updated++;
+
+            await using var command = new MySqlCommand(
+                """
+            INSERT INTO device_ip_mappings
+                (service_account_id, ip_address, mobility, source, updated_at, bus_no)
+            VALUES
+                (@id, @ip, @mobility, @source, @updated, @bus)
+            ON DUPLICATE KEY UPDATE
+                ip_address = IF(source = 'manual', ip_address, VALUES(ip_address)),
+                mobility = IF(source = 'manual', mobility, VALUES(mobility)),
+                bus_no = IF(source = 'manual', bus_no, VALUES(bus_no)),
+                updated_at = IF(source = 'manual', updated_at, VALUES(updated_at)),
+                source = IF(source = 'manual', source, VALUES(source));
+            """,
+                connection,
+                transaction);
+
+            command.Parameters.AddWithValue("@id", mapping.ServiceAccountId);
+            command.Parameters.AddWithValue("@ip", mapping.IpAddress);
+            command.Parameters.AddWithValue("@mobility", mapping.Mobility);
+            command.Parameters.AddWithValue("@source", mapping.Source);
+            command.Parameters.AddWithValue("@updated", mapping.UpdatedAt);
+            command.Parameters.AddWithValue(
+                "@bus", (object?)mapping.BusNo ?? DBNull.Value);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+
+        return new DeviceIpImportResult
+        {
+            TotalCount = mappings.Count,
+            InsertedCount = inserted,
+            UpdatedCount = updated,
+            SkippedManualCount = skippedManual
+        };
+    }
+
+
+
     public async Task<IReadOnlyList<StoredExcelRow>> ListAllExcelRowsAsync(int take = 2000, CancellationToken cancellationToken = default)
     {
         var settings = CurrentSettings();

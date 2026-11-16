@@ -185,7 +185,8 @@ async function uploadExcel(file) {
 
 function renderImport(payload) {
   const importData = payload.import;
-  importedRows = importData.rows || [];
+    importedRows = importData.rows || [];
+    alert(JSON.stringify(importedRows[0], null, 2));
   fileName = importData.fileName;
   refreshDevices();
   dropzone.classList.add("compact");
@@ -1233,36 +1234,51 @@ async function runProcess() {
 }
 
 function refreshDevices() {
-  const previous = new Map(devices.map((device) => [device.serviceAccountId, device]));
-  const map = new Map();
-  for (const row of needsIpRows()) {
-    const id = row.immediate.serviceAccountId;
-    if (!id) {
-      continue;
-    }
-    const prior = previous.get(id);
-    const current = map.get(id) || {
-      serviceAccountId: id,
-      mobility: row.mobility,
-      transactions: 0,
-      ip: prior?.ip || null,
-      busNo: prior?.busNo || null,
-      localPath: prior?.localPath || null,
-      downloadStatus: prior?.downloadStatus || null,
-      pingReachable: prior?.pingReachable ?? null,
-      pingLabel: prior?.pingLabel || "",
-      logDates: []
-    };
-    current.transactions += 1;
-    const day = dayFromTransaction(row.immediate.transactionDate);
-    if (day && !current.logDates.includes(day)) {
-      current.logDates.push(day);
-    }
-    map.set(id, current);
-  }
-  devices = [...map.values()];
-}
+    const previous = new Map(
+        devices.map((device) => [device.serviceAccountId, device])
+    );
 
+    const map = new Map();
+
+    for (const row of needsIpRows()) {
+        const id = row.immediate.serviceAccountId;
+
+        if (!id) {
+            continue;
+        }
+
+        const prior = previous.get(id);
+
+        const current = map.get(id) || {
+            serviceAccountId: id,
+            mobility: row.mobility,
+            transactions: 0,
+            ip: prior?.ip || null,
+            busNo: prior?.busNo || null,
+            localPath: prior?.localPath || null,
+            downloadStatus: prior?.downloadStatus || null,
+            pingReachable: prior?.pingReachable ?? null,
+            pingLabel: prior?.pingLabel || "",
+            logDates: []
+        };
+
+        current.transactions++;
+
+        const day = dayFromTransaction(row.immediate.transactionDate);
+
+        if (day && !current.logDates.includes(day)) {
+            current.logDates.push(day);
+        }
+
+        map.set(id, current);
+    }
+
+    devices = [...map.values()];
+
+    for (const device of devices) {
+        device.logDates.sort();
+    }
+}
 function hasAnyLog() {
   return devices.some((device) => device.localPath);
 }
@@ -1334,10 +1350,15 @@ function renderTable(headers, rows) {
 }
 
 function dayFromTransaction(value) {
-  if (!value) {
-    return null;
-  }
-  return String(value).slice(0, 10);
+    if (!value) return null;
+
+    const raw = String(value).trim();
+
+    if (/^\d{14}$/.test(raw)) {
+        return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+    }
+
+    return raw.slice(0, 10);
 }
 
 function formatDate(value) {

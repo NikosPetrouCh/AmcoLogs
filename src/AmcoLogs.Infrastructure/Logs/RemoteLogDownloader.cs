@@ -112,7 +112,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
             : $"{device.ServiceAccountId}: σταθερή, κατέβασμα του nlog.");
 
         var user = string.IsNullOrWhiteSpace(_settings.Username) ? "amco" : _settings.Username;
-        var port = _settings.Port <= 0 ? 8022 : _settings.Port;
+        var port = mobile ? 1030 : 8022;
         var remoteDir = string.IsNullOrWhiteSpace(_settings.RemoteLogPath)
             ? "/opt/amco/middleware/TVMserver"
             : _settings.RemoteLogPath.TrimEnd('/');
@@ -491,20 +491,22 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
     private static bool IsMobile(string mobility) =>
         string.Equals(mobility, "Mobile", StringComparison.OrdinalIgnoreCase);
 
+
     private string ResolveLocalFolder()
     {
-        if (!string.IsNullOrWhiteSpace(_settings.LocalDownloadFolder))
-        {
-            Directory.CreateDirectory(_settings.LocalDownloadFolder);
-            return _settings.LocalDownloadFolder;
-        }
+        var folder = !string.IsNullOrWhiteSpace(_settings.LocalDownloadFolder)
+            ? _settings.LocalDownloadFolder
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                "Amco files");
 
-        var folder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            "Amco files");
-        Directory.CreateDirectory(folder);
-        return folder;
+        var logsFolder = Path.Combine(folder, "logs", "OSETH");
+
+        Directory.CreateDirectory(logsFolder);
+
+        return logsFolder;
     }
+
 
     private static IReadOnlyList<string> NormalizeDates(IEnumerable<string>? dates)
     {
