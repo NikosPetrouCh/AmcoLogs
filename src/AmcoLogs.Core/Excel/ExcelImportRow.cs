@@ -10,6 +10,10 @@ public sealed class ExcelImportRow
     public RowDisposition Disposition { get; init; } = RowDisposition.Unclassified;
     public string? Decision { get; init; }
     public string? ScreenReason { get; init; }
+    public string? OasaTerminal { get; init; }
+    public string? StationName { get; init; }
+    public string? StatusCode { get; init; }
+    public string? ResolvedIp { get; init; }
 
     public DeviceMobility Mobility => DeviceCode.Classify(Immediate.ServiceAccountId);
     public bool HasServiceAccountId => !string.IsNullOrWhiteSpace(Immediate.ServiceAccountId);
@@ -21,6 +25,10 @@ public sealed class ExcelImportRow
         Archive = Archive,
         Disposition = disposition,
         Decision = decision,
-        ScreenReason = reason
+        ScreenReason = reason,
+        OasaTerminal = OasaTerminal,
+        StationName = StationName,
+        StatusCode = StatusCode,
+        ResolvedIp = ResolvedIp
     };
 }

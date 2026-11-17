@@ -1,5 +1,6 @@
 using AmcoLogs.Core.Excel;
 using AmcoLogs.Core.Persistence;
+using AmcoLogs.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AmcoLogs.Web.Controllers;
@@ -10,11 +11,13 @@ public sealed class ImportsController : ControllerBase
 {
     private readonly IExcelImportParser _parser;
     private readonly IAmcoLogsStore _store;
+    private readonly MySqlDeskArchive _desk;
 
-    public ImportsController(IExcelImportParser parser, IAmcoLogsStore store)
+    public ImportsController(IExcelImportParser parser, IAmcoLogsStore store, MySqlDeskArchive desk)
     {
         _parser = parser;
         _store = store;
+        _desk = desk;
     }
 
     [HttpPost("excel")]
@@ -37,7 +40,10 @@ public sealed class ImportsController : ControllerBase
         }
 
         await using var stream = file.OpenReadStream();
-        var screened = TransactionScreen.Apply(_parser.Parse(stream, file.FileName));
+        var parsed = _parser.Parse(stream, file.FileName);
+        var screened = parsed.Profile == ExcelImportResult.OasaProfile
+            ? parsed
+            : TransactionScreen.Apply(parsed);
 
         SavedExcelImport? saved = null;
         string? persistMessage = null;
@@ -51,6 +57,18 @@ public sealed class ImportsController : ControllerBase
             else
             {
                 saved = await _store.SaveImportAsync(TransactionScreen.ForStorage(screened), cancellationToken);
+                if (saved is not null && screened.Profile == ExcelImportResult.OsethProfile)
+                {
+                    try
+                    {
+                        await _desk.SaveExcelCaseAsync("OSETH", null, screened, cancellationToken);
+                        persistMessage = "Γράφτηκε και στο General OSETH.";
+                    }
+                    catch (InvalidOperationException exception)
+                    {
+                        persistMessage = exception.Message;
+                    }
+                }
             }
         }
 
@@ -58,7 +76,8 @@ public sealed class ImportsController : ControllerBase
         {
             Import = screened,
             Saved = saved,
-            PersistMessage = persistMessage
+            PersistMessage = persistMessage,
+            NeedsNetwork = screened.Profile == ExcelImportResult.OasaProfile
         });
     }
 
@@ -86,4 +105,5 @@ public sealed class ExcelImportResponse
     public required ExcelImportResult Import { get; init; }
     public SavedExcelImport? Saved { get; init; }
     public string? PersistMessage { get; init; }
+    public bool NeedsNetwork { get; init; }
 }

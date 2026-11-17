@@ -18,8 +18,11 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 builder.Services.AddSingleton<LocalConnectionStore>();
 builder.Services.AddSingleton<IExcelImportParser, ClosedXmlExcelImportParser>();
 builder.Services.AddSingleton<IAmcoLogsStore, MySqlAmcoLogsStore>();
+builder.Services.AddSingleton<MySqlDeskArchive>();
 builder.Services.AddSingleton<IIpCatalog>(_ =>
     new FileIpCatalog(Path.Combine(builder.Environment.ContentRootPath, "data")));
+builder.Services.AddSingleton<IOasaTerminalCatalog>(_ =>
+    new FileOasaTerminalCatalog(Path.Combine(builder.Environment.ContentRootPath, "data")));
 builder.Services.AddSingleton<ManualIpCache>();
 builder.Services.AddSingleton(new DeviceAccessSettings
 {
@@ -32,6 +35,8 @@ builder.Services.AddSingleton(new DeviceAccessSettings
 builder.Services.AddSingleton<ILogDownloadJob, RemoteLogDownloader>();
 builder.Services.AddSingleton<SshConnectionProbe>();
 builder.Services.AddSingleton<NlogSliceReader>();
+builder.Services.AddSingleton<ITransactionFlowReader>(_ =>
+    new TransactionFlowReader(Path.Combine(builder.Environment.ContentRootPath, "data", "flow")));
 builder.Services.AddSingleton<INlogSaleLocator, NlogSaleLocator>();
 builder.Services.AddSingleton<SaleInvestigation>();
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>

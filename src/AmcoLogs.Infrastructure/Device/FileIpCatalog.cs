@@ -23,6 +23,7 @@ public sealed class FileIpCatalog : IIpCatalog
         {
             LoadFile(Path.Combine(root, "Ips_TVM360.json"), "Fixed", "Ips_TVM360");
             LoadFile(Path.Combine(root, "Ips_Mobile.json"), "Mobile", "Ips_Mobile");
+            LoadOasa(Path.Combine(root, "Ips_Oasa.json"));
             if (_byDigits.Count > 0)
             {
                 break;
@@ -99,6 +100,69 @@ public sealed class FileIpCatalog : IIpCatalog
         }
     }
 
+    private void LoadOasa(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var json = Regex.Replace(File.ReadAllText(path), @"\}\s*\{", "},{");
+        using var document = JsonDocument.Parse(json);
+        lock (_gate)
+        {
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in document.RootElement.EnumerateArray())
+                {
+                    AddOasa(item);
+                }
+            }
+            else if (document.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                AddOasa(document.RootElement);
+            }
+        }
+    }
+
+    private void AddOasa(JsonElement item)
+    {
+        var ctvm = ReadValue(item, "ctvm", "CTVM", "serviceAccountId", "serviceAccount");
+        var ip = ReadValue(item, "ip", "IP", "ipAddress");
+        var terminal = ReadValue(item, "terminal", "oasa", "oasaTerminal", "code");
+        var station = ReadValue(item, "station", "stationName", "name", "stop");
+        if (string.IsNullOrWhiteSpace(ctvm) || string.IsNullOrWhiteSpace(ip))
+        {
+            return;
+        }
+
+        var mobility = DeviceCode.Classify(ctvm).ToString();
+        Add(ctvm, ip, null, mobility, "Ips_Oasa", station, terminal);
+    }
+
+    private static string? ReadValue(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.String)
+            {
+                return value.GetString();
+            }
+
+            if (value.ValueKind == JsonValueKind.Number)
+            {
+                return value.GetRawText();
+            }
+        }
+
+        return null;
+    }
+
     private void LoadFile(string path, string mobility, string source)
     {
         if (!File.Exists(path))
@@ -131,7 +195,7 @@ public sealed class FileIpCatalog : IIpCatalog
         }
     }
 
-    private void Add(string? ctvm, string? ip, string? bus, string mobility, string source)
+    private void Add(string? ctvm, string? ip, string? bus, string mobility, string source, string? station = null, string? terminal = null)
     {
         if (string.IsNullOrWhiteSpace(ctvm) || string.IsNullOrWhiteSpace(ip))
         {
@@ -150,7 +214,9 @@ public sealed class FileIpCatalog : IIpCatalog
             IpAddress = ip.Trim(),
             BusNo = string.IsNullOrWhiteSpace(bus) ? null : bus.Trim(),
             Mobility = mobility,
-            Source = source
+            Source = source,
+            Station = string.IsNullOrWhiteSpace(station) ? null : station.Trim(),
+            Terminal = string.IsNullOrWhiteSpace(terminal) ? null : terminal.Trim()
         };
 
         if (!_byDigits.TryGetValue(digits, out var list))

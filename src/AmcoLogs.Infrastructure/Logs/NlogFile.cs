@@ -31,6 +31,26 @@ public static class NlogFile
         return match.Success ? match.Groups[1].Value : null;
     }
 
+    public static string? ExtractBeside(string zipPath)
+    {
+        using var zip = ZipFile.OpenRead(zipPath);
+        var entry = zip.Entries.FirstOrDefault(item =>
+            item.Name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)
+            || item.Name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            return null;
+        }
+
+        var folder = Path.GetDirectoryName(zipPath) ?? ".";
+        var name = string.IsNullOrWhiteSpace(entry.Name)
+            ? Path.GetFileNameWithoutExtension(zipPath) + ".log"
+            : entry.Name;
+        var dest = Path.Combine(folder, name);
+        entry.ExtractToFile(dest, overwrite: true);
+        return dest;
+    }
+
     public static Stream OpenRead(string path)
     {
         if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))

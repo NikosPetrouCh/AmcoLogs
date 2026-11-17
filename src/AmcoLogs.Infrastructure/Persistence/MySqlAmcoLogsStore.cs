@@ -625,6 +625,8 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        await DeskTables.ApplyAsync(connection, cancellationToken);
+
         await MigrateLegacyColumnsAsync(connection, cancellationToken);
     }
 

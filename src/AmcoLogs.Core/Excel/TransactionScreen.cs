@@ -12,6 +12,7 @@ public static class TransactionScreen
         return new ExcelImportResult
         {
             FileName = import.FileName,
+            Profile = import.Profile,
             Rows = import.Rows.Select(Screen).ToArray(),
             RecognizedHeaders = import.RecognizedHeaders,
             ArchiveExtraHeaders = import.ArchiveExtraHeaders,
@@ -33,6 +34,7 @@ public static class TransactionScreen
         return new ExcelImportResult
         {
             FileName = import.FileName,
+            Profile = import.Profile,
             Rows = rows,
             RecognizedHeaders = import.RecognizedHeaders,
             ArchiveExtraHeaders = import.ArchiveExtraHeaders,
@@ -45,6 +47,7 @@ public static class TransactionScreen
         return new ExcelImportResult
         {
             FileName = import.FileName,
+            Profile = import.Profile,
             Rows = import.Rows.Where(row => row.Disposition is not RowDisposition.ExcludedInvalidServiceAccount
                 and not RowDisposition.ExcludedType04).ToArray(),
             RecognizedHeaders = import.RecognizedHeaders,

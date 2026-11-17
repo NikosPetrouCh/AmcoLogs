@@ -7,6 +7,8 @@ public sealed record DeviceIpHit
     public string? BusNo { get; init; }
     public required string Mobility { get; init; }
     public required string Source { get; init; }
+    public string? Station { get; init; }
+    public string? Terminal { get; init; }
 }
 
 public sealed class IpResolveResult

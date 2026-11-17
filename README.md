@@ -1,148 +1,112 @@
 # AmcoLogs
 
-Εφαρμογή γραφείου για διερεύνηση αποτυχημένων πωλήσεων CTVM. Διαβάζει Excel, βρίσκει την IP της συσκευής, κατεβάζει το nlog της ημέρας και βγάζει πόρισμα **μόνο για τη συναλλαγή του Excel**, όχι για τις υπόλοιπες πωλήσεις του αρχείου.
+Εφαρμογή γραφείου για διερεύνηση αποτυχημένων πωλήσεων CTVM. Διαβάζει Excel OSETH ή ΟΑΣΑ, ή μία συσκευή, βρίσκει την IP, κατεβάζει τα logs και κρατάει τη συγκεκριμένη συναλλαγή.
 
-Τρέχει τοπικά ως ASP.NET Core + απλό HTML/CSS/JS (`http://localhost:5204`). Τα credentials και τα logs μένουν στο μηχάνημα.
+Τρέχει τοπικά ως ASP.NET Core και απλό HTML/CSS/JS στο `http://localhost:5204`. Ο κωδικός συσκευής και η σύνδεση MySQL μένουν στο μηχάνημα.
 
-## Τι κάνει, με τη σειρά
+## Είσοδος
 
-1. **Excel** — drop `.xlsx`. Κρατάει Transaction ID, RRN, Amount, TransactionDate, EticketTransactionResult, ServiceAccountID και αν η συσκευή είναι κινητή ή σταθερή.
-2. **IPs** — διαβάζει `Ips_TVM360.json` (σταθερά) και `Ips_Mobile.json` (κινητά). Αν λείπει IP, τη γράφεις χειροκίνητα.
-3. **Logs** — `scp -P 1030 amco@IP:...` στο `Desktop\Nikos`. Αν αποτύχει, αφήνεις εσύ το nlog στη συσκευή.
-4. **Πόρισμα** — εντοπίζει στο log **μόνο** τις συναλλαγές του Excel (κάρτα). Μαζεύει ERROR στο παράθυρο της πώλησης και αποθηκεύει στη MySQL.
+Στην Εισαγωγή διαλέγεις:
 
-Η βάση έχει τρία ράφια, κάτω αριστερά:
+- **Daily Exceptions** — drop Excel
+- **Device investigation** — μία συσκευή, με CTVM
 
-| Οθόνη | Περιεχόμενο |
-| --- | --- |
-| Error reports | Πορίσματα: Transaction ID, παράθυρο γραμμών, ERROR |
-| CTVM IPs | Αντιστοιχίες CTVM → IP → όχημα από JSON + χειροκίνητες εγγραφές |
-| General | Τα στοιχεία της συναλλαγής από το Excel |
+Η IP δεν μπαίνει εδώ. Συμπληρώνεται στο επόμενο βήμα, από τα JSON ή με το χέρι.
 
-## Βήμα 1 — Excel
+## Daily Exceptions
 
-Απαιτούμενες στήλες (η κεφαλίδα μπορεί να έχει μικρές παραλλαγές ονόματος):
+Αν η κεφαλίδα έχει κωδικό τερματικού ΟΑΣΑ, το αρχείο είναι ΟΑΣΑ. Αλλιώς είναι OSETH.
 
-- `ServiceAccountID`
-- `RRN`
-- `Amount`
-- `EticketTransactionResult`
-- `TransactionID`
-- `TransactionDate`
+OSETH, στήλες: `ServiceAccountID`, `RRN`, `Amount`, `EticketTransactionResult`, `TransactionID`, `TransactionDate`.
 
-Τύπος συσκευής από το ServiceAccountID:
+- τύπος 04 εκτός
+- τύπος 03, και τύπος 02 με ποσό 0,02: αυτόματο YES
+- άλλος τύπος 02: χρειάζεται IP και logs
 
-- ξεκινάει από **36** → σταθερό CTVM
-- ξεκινάει από **4** → κινητό (λεωφορείο)
+ΟΑΣΑ, στήλες: κωδικός τερματικού, ημερομηνία συναλλαγής, ποσό, κωδ. κατάστασης. Το CTVM, η IP, το τερματικό και ο σταθμός βγαίνουν από το `src/AmcoLogs.Web/data/Ips_Oasa.json`:
 
-Διάλεξε κατηγορία 01–04. Οι γραμμές αυτής της κατηγορίας περνάνε στα επόμενα βήματα. Αν η MySQL είναι συνδεδεμένη, το Excel γράφεται αμέσως στο General.
-
-## Βήμα 2 — IPs
-
-Τα αρχεία είναι στο `src/AmcoLogs.Web/data/`:
-
-- `Ips_TVM360.json` — σταθερά: `{ "CTVM36246554": "10.249.16.43", ... }`
-- `Ips_Mobile.json` — κινητά: `{ "vehicle", "ctvm", "ip" }`
-
-Το ServiceAccountID του Excel αντιστοιχίζεται στα ψηφία του `CTVM…`. Αν λείπει IP ή όχημα, γράψε το στο πεδίο (βήμα 2) ή στο **CTVM IPs** αριστερά. Η χειροκίνητη γραμμή αποθηκεύεται στη MySQL (`source = manual`) και την επόμενη φορά ενώνεται με τα JSON. Τα JSON **δεν** αλλάζουν· η βάση κρατά την ένωση.
-
-Τα δύο αρχεία μπαίνουν στο git (`src/AmcoLogs.Web/data/`). Με push ανεβαίνουν στο GitHub.
-
-## Βήμα 3 — Logs
-
-Η εντολή είναι ακριβώς αυτή η μορφή:
-
-```
-scp -P 1030 amco@10.249.19.21:/opt/amco/middleware/TVMserver/nlog-all-YYYY-MM-DD.log "C:\Users\User\Desktop\Nikos\CTVMxxxx\"
+```json
+[{ "terminal": "12345", "ctvm": "CTVM36246554", "ip": "10.249.16.43", "station": "Σύνταγμα" }]
 ```
 
-- Πόρτα **1030**, χρήστης **amco**, φάκελος προορισμού **Desktop\Nikos\ΣΥΣΚΕΥΗ**
-- Ημερομηνία από το `TransactionDate` του Excel
-- Ίδια εντολή για σταθερά και κινητά — χωρίς ping και χωρίς zip
+Ο τύπος συσκευής βγαίνει από το CTVM: ψηφία που ξεκινούν από 36 είναι σταθερό, από 4 κινητό.
 
-Αν το `scp` αποτύχει, διάλεξε / άσε το nlog στη γραμμή της συσκευής.
+## Device investigation
 
-## Βήμα 4 — Πόρισμα
+Φορέας OSETH ή OASA. Στον OASA διαλέγεις και TRAM ή METRO.
 
-Δεν διαβάζει «όλο το log ως λίστα πωλήσεων». Για κάθε γραμμή του Excel:
+- **Μία συναλλαγή** στο middleware: ημερομηνία και ώρα `08:23`
+- **Εύρος ημερομηνιών**: από, έως, και το κείμενο για grep
+- Service: `middleware.service`, `coinman.service`, `bnr.service`, `printman.service`, `frontman.service`
 
-1. Παίρνει το nlog της **ίδιας συσκευής** και της **ίδιας ημέρας**.
-2. Ψάχνει `Selecting product` — εκεί αρχίζει μία πώληση (~200 γραμμές, όριο 250, ή μέχρι το επόμενο Selecting product).
-3. Μέσα στο παράθυρο πρέπει να υπάρχει `Creating new transaction with id: {guid}` που να ταιριάζει με το **Transaction ID του Excel**.
-4. Κρατάει **μόνο κάρτα** (`Setting payment method to: Card` / `Payment Method: (Card)`). Τα μετρητά αγνοούνται.
-5. Μέσα σε αυτό το κομμάτι μαζεύει γραμμές `ERROR`.
+## IPs
 
-Πόρισμα ανά συναλλαγή:
+- `Ips_TVM360.json` — σταθερά OSETH
+- `Ips_Mobile.json` — κινητά OSETH
+- `Ips_Oasa.json` — ΟΑΣΑ, με σταθμό και τερματικό
 
-| Verdict | Σημαίνει |
+Το JSON κερδίζει τη βάση, εκτός αν η γραμμή είναι `source = manual`. Χωρίς MySQL η χειροκίνητη IP μένει για τη συνεδρία.
+
+## Logs
+
+Πρώτα ping. Κατεβαίνουν μόνο όσες συσκευές απάντησαν.
+
+Φάκελος: `Desktop\Amco files\logs\OSETH\<CTVM>`.
+
+| Συσκευή | Τι γίνεται |
 | --- | --- |
-| LocatedWithErrors | Η card πώληση βρέθηκε και έχει ERROR στο παράθυρο |
-| LocatedNoErrors | Βρέθηκε, χωρίς ERROR σε αυτό το slice |
-| NotFoundInLog | Το Transaction ID δεν βρέθηκε ως card πώληση στο log |
-| NoLogFile | Δεν υπάρχει nlog για αυτή τη συσκευή / ημέρα |
+| Σταθερή | πόρτα 8022, `scp` του `nlog-all-ημέρα.log` από `/opt/amco/middleware/TVMServer` |
+| Κινητή | πόρτα 1030, `sudo zip`, κατέβασμα, extract, σβήσιμο του zip τοπικά και στη συσκευή |
 
-Μετά, αν η MySQL είναι συνδεδεμένη, γράφει τα πορίσματα στα Error reports. Τα CTVM IPs και το General έχουν ήδη γραφτεί νωρίτερα (IP στο βήμα 2, Excel στο βήμα 1).
+Το nlog δεν σβήνεται.
 
-Αργότερα θα προστεθούν exceptions / logs που δείχνουν ότι η συναλλαγή δεν ολοκληρώθηκε. Προς το παρόν το πόρισμα είναι εντοπισμός + ERROR.
+Μία συναλλαγή middleware κόβεται από το `Selecting product` πάνω από την ώρα μέχρι το επόμενο και γράφεται στο `nlog-slice-ημέρα-ωρα.log`. Το πλήρες nlog μένει δίπλα του.
 
-## Βάση δεδομένων
+Η ώρα:
 
-Σύνδεση: Database → Connection (κάτω αριστερά, όχι μόνιμα ορατή φόρμα). Δημιουργεί τη βάση αν δεν υπάρχει.
+- OSETH: τα ψηφία 6–9 του Transaction ID, π.χ. `08:23`
+- ΟΑΣΑ: η ώρα μέσα στην ημερομηνία συναλλαγής
+- μία συσκευή: την γράφεις `08:23`
 
-Πίνακες:
+Εύρος ή άλλο service: το grep γράφεται στο `grep-result.log`. Τα αρχεία που κατέβηκαν μένουν. Για coinman, bnr, printman και frontman η εντολή στη συσκευή είναι `journalctl -u ….service --since … --until … > αρχείο.log` και το αρχείο κατεβαίνει από το home.
 
-- `excel_import_batches` / `excel_import_rows` — General
-- `device_ip_mappings` — CTVM IPs (`source` = `Ips_TVM360` / `Ips_Mobile` ή `manual`)
-- `investigation_findings` — Error reports (verdict, παράθυρο γραμμών, `errors_json`)
+## Flow
 
-Χωρίς MySQL το flow δουλεύει στη συνεδρία. Το πόρισμα και οι χειροκίνητες IP μένουν στη μνήμη μέχρι να συνδεθείς.
+Σε μία συναλλαγή το κομμάτι συγκρίνεται με το αρχέτυπο του φορέα της. OSETH και ΟΑΣΑ είναι χωριστά:
+
+- `src/AmcoLogs.Web/data/flow/oseth/archetype.txt`
+- `src/AmcoLogs.Web/data/flow/oasa/archetype.txt`
+
+Ως 20 γραμμές, με τη σειρά. Τα δείγματα σφάλματος μπαίνουν σε `errors/<τύπος>.txt`, ως 20 γραμμές. Το όνομα του αρχείου είναι ο τύπος. Οι γραμμές με `#` αγνοούνται.
+
+## Βάση
+
+Σύνδεση από Database → Connection. Το αρχείο είναι ανά μηχάνημα: `%LocalAppData%\AmcoLogs\mysql-connection.json`.
+
+Αριστερά, με τη σειρά: General, Error reports, CTVM IPs. Μέσα σε κάθε ένα μπαίνεις σε OSETH ή OASA. Ο OASA έχει METRO και μετά TRAM. Το TRAM δεν έχει Excel.
+
+Χωρίς MySQL η διερεύνηση μένει στη συνεδρία. Το μήνυμα είναι «Η MySQL δεν είναι συνδεδεμένη.»
 
 ## Πώς το τρέχεις
 
-Προϋποθέσεις: .NET 10 SDK, OpenSSH `scp`, MySQL αν θέλεις αποθήκευση.
+Χρειάζεται .NET 10 SDK και OpenSSH. MySQL μόνο αν θέλεις να μείνει η δουλειά.
 
 ```powershell
 dotnet run --project src/AmcoLogs.Web/AmcoLogs.Web.csproj --urls http://localhost:5204
 ```
 
-Ή άνοιξε το `AmcoLogs.slnx` στο Visual Studio και F5 στο profile `http`.
-
-Το `appsettings.Local.json` έχει DeviceAccess (χρήστης `amco`, πόρτα 1030). Δεν μπαίνει στο git.
+Ο κωδικός της συσκευής μπαίνει στο `appsettings.Local.json` (`DeviceAccess:Password`, χρήστης `amco`). Το αρχείο δεν ανεβαίνει στο git. Η πόρτα στο κατέβασμα είναι 8022 για σταθερά και 1030 για κινητά.
 
 ## Τι δεν μπαίνει στο git
 
-- αρχεία `*.log` (τα nlog των συσκευών), `samples/`
+- `*.log`, τα nlog που κατεβαίνουν
 - `appsettings.Local.json`
-- downloads/uploads στο `%LocalAppData%\AmcoLogs\`
-- MySQL connection (`%LocalAppData%\AmcoLogs\mysql-connection.json`)
-
-Οι φάκελοι πηγαίου κώδικα `src/AmcoLogs.Core/Logs` και `src/AmcoLogs.Infrastructure/Logs` **μπαίνουν** στο git. Χωρίς αυτούς το build σπάει (`AmcoLogs.Core.Logs`, `InvestigationFinding`).
-
-Τα nlog έχουν σειριακούς καρτών και κλειδιά. Μην τα κάνεις commit.
+- `%LocalAppData%\AmcoLogs\`
 
 ## Αρχιτεκτονική
 
 ```
-src/AmcoLogs.Core            μοντέλα Excel, συσκευή, logs, persistence
-src/AmcoLogs.Infrastructure  ClosedXML, IP JSON catalog, scp, nlog locator, MySQL
-src/AmcoLogs.Web             API + wwwroot (vanilla JS, όχι React)
+src/AmcoLogs.Core            μοντέλα Excel, συσκευή, logs, γραφείο
+src/AmcoLogs.Infrastructure  ClosedXML, JSON, scp, slice, flow, MySQL
+src/AmcoLogs.Web             API και wwwroot
 ```
-
-- `FileIpCatalog` — Ips_TVM360.json + Ips_Mobile.json
-- `NlogSaleLocator` — παράθυρο Selecting product + Transaction ID, μόνο κάρτα, ERROR
-- `SaleInvestigation` — δένει τις γραμμές Excel με τα αρχεία nlog της σωστής ημέρας
-- `RemoteLogDownloader` — `scp -P 1030 amco@IP:...`
-
-## API (σύντομα)
-
-| Μέθοδος | Διαδρομή | Ρόλος |
-| --- | --- | --- |
-| POST | `/api/imports/excel` | Διάβασμα Excel, προαιρετική εγγραφή General |
-| POST | `/api/devices/resolve` | IP από τα δύο JSON |
-| POST | `/api/devices/ip` | Χειροκίνητη IP |
-| POST | `/api/logs/download` | scp -P 1030 |
-| POST | `/api/logs/upload` | Χειροκίνητο nlog ανά ServiceAccountID |
-| POST | `/api/logs/process` | Πόρισμα μόνο για τα Transaction ID του Excel |
-| GET | `/api/logs/findings` | Error reports |
-| GET | `/api/devices` | CTVM IPs |
-| GET | `/api/imports/rows` | General |

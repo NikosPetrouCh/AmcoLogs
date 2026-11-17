@@ -1,14 +1,14 @@
 :root {
-  --paper: #f3eee4;
-  --ink: #1d1914;
-  --muted: #6b6258;
-  --line: #d8cfc2;
-  --panel: #fffaf2;
-  --copper: #b45309;
-  --copper-dark: #7c2d12;
-  --moss: #3f6212;
-  --rail: #241f1a;
-  --rail-text: #efe6d8;
+  --paper: #e4dfd3;
+  --ink: #2a261f;
+  --muted: #6b6458;
+  --line: #d2c8b4;
+  --panel: #f1ece1;
+  --copper: #1f4e86;
+  --copper-dark: #1a3d68;
+  --moss: #1d6b45;
+  --rail: #0b1c33;
+  --rail-text: #e6eef6;
 }
 
 * { box-sizing: border-box; }
@@ -18,9 +18,7 @@
 html, body {
   margin: 0;
   min-height: 100%;
-  background:
-    radial-gradient(circle at 1px 1px, rgba(36, 31, 26, 0.08) 1px, transparent 0) 0 0 / 18px 18px,
-    var(--paper);
+  background: var(--paper);
   color: var(--ink);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
@@ -49,7 +47,7 @@ button, input {
   gap: 16px;
   align-items: center;
   padding-bottom: 22px;
-  border-bottom: 1px solid #3d342c;
+  border-bottom: 1px solid #1e3348;
 }
 
 .brand-mark {
@@ -58,7 +56,7 @@ button, input {
   display: grid;
   place-items: center;
   background: var(--copper);
-  color: #fff7ed;
+  color: #f7fbff;
   font-weight: 700;
   font-size: 22px;
   letter-spacing: 0.04em;
@@ -79,12 +77,15 @@ button, input {
 }
 
 .brand small,
-.pipeline small,
+.pipeline small {
+  color: #9aabbd;
+}
+
 .kicker,
 .hint,
 .muted,
 .drop-copy {
-  color: #c4b8a8;
+  color: var(--muted);
 }
 
 .brand small,
@@ -118,8 +119,8 @@ button, input {
   gap: 12px;
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #3d342c;
-  background: #2c2621;
+  border: 1px solid #1e3348;
+  background: #122033;
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -130,7 +131,7 @@ button, input {
 }
 
 .pipeline li.done .step {
-  border-color: #d6a26a;
+  border-color: #7eb6ff;
 }
 
 .actions {
@@ -185,6 +186,10 @@ button, input {
   align-items: center;
 }
 
+.ip-row.oasa-row {
+  grid-template-columns: 1.1fr 0.5fr 1fr 0.8fr 1fr 0.7fr;
+}
+
 .dl-row {
   grid-template-columns: 1.1fr 0.9fr 0.9fr auto 1fr;
   align-items: center;
@@ -202,13 +207,14 @@ button, input {
 }
 
 .verdict-ok { color: var(--moss); }
-.verdict-bad { color: #9f1239; }
+.verdict-bad { color: #9f2d3a; }
 .verdict-miss { color: var(--muted); }
 
 .ip-edit {
   width: 100%;
   border: 1px solid var(--line);
-  background: var(--panel);
+  background: #f7f3ea;
+  color: var(--ink);
   padding: 6px 8px;
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
@@ -235,7 +241,7 @@ button, input {
 .step {
   width: 28px;
   height: 28px;
-  border: 1px solid #8a7c6c;
+  border: 1px solid #3d6ea8;
   display: grid;
   place-items: center;
   font-family: "IBM Plex Mono", monospace;
@@ -256,7 +262,7 @@ button, input {
 .db-nav {
   margin-top: auto;
   padding-top: 20px;
-  border-top: 1px solid #3d342c;
+  border-top: 1px solid #1e3348;
   display: grid;
   gap: 6px;
 }
@@ -266,7 +272,7 @@ button, input {
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #c4b8a8;
+  color: #9aabbd;
 }
 
 .db-link {
@@ -282,13 +288,13 @@ button, input {
 .db-link:hover,
 .db-link.active {
   opacity: 1;
-  background: #2c2621;
+  background: #122033;
 }
 
 .db-dot {
   margin: 10px 0 0;
   font-size: 12px;
-  color: #c4b8a8;
+  color: #9aabbd;
 }
 
 .db-connect {
@@ -303,8 +309,8 @@ button, input {
   margin-top: 16px;
   max-height: 180px;
   overflow: auto;
-  background: #241f1a;
-  color: #efe6d8;
+  background: #071422;
+  color: #d7e6f7;
   padding: 12px;
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
@@ -368,10 +374,8 @@ h1, h2 {
   text-decoration: none;
 }
 .dropzone {
-  border: 1.5px dashed #b7a894;
-  background:
-    repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(180, 83, 9, 0.04) 8px, rgba(180, 83, 9, 0.04) 9px),
-    var(--panel);
+  border: 1.5px dashed #c9bda8;
+  background: #ebe5d8;
   min-height: 180px;
   display: grid;
   place-content: center;
@@ -381,7 +385,7 @@ h1, h2 {
 
 .dropzone.hover {
   border-color: var(--copper);
-  background-color: #fff4e6;
+  background-color: #e3dccb;
 }
 
 .drop-title {
@@ -406,7 +410,7 @@ h1, h2 {
 }
 
 .status-line.error {
-  color: #9f1239;
+  color: #9f2d3a;
 }
 
 .dropzone.compact {
@@ -448,7 +452,7 @@ h1, h2 {
 .result-card.selected {
   border-color: var(--copper-dark);
   box-shadow: inset 3px 0 0 var(--copper);
-  background: #fff4e6;
+  background: #e9e2d3;
 }
 
 .result-card.yes,
@@ -575,7 +579,7 @@ button.result-card {
   padding: 4px 8px;
 }
 
-.chip.fixed { border-color: #365314; color: #365314; }
+.chip.fixed { border-color: #1d6b45; color: #1d6b45; }
 .chip.mobile { border-color: var(--copper-dark); color: var(--copper-dark); }
 
 .table-wrap {
@@ -610,7 +614,7 @@ th {
 .side {
   padding: 28px 22px;
   border-left: 1px solid var(--line);
-  background: rgba(255, 250, 242, 0.7);
+  background: rgba(8, 20, 36, 0.7);
 }
 
 .panel {
@@ -635,7 +639,8 @@ th {
 
 .catalog-form input {
   border: 1px solid var(--line);
-  background: white;
+  background: #f7f3ea;
+  color: var(--ink);
   padding: 8px;
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
@@ -668,7 +673,8 @@ th {
 
 .db-form input {
   border: 1px solid var(--line);
-  background: white;
+  background: #f7f3ea;
+  color: var(--ink);
   padding: 8px;
 }
 
@@ -686,7 +692,7 @@ th {
 
 .db-status.ok { color: var(--moss); }
 .db-status.bad, .db-status.pending { color: var(--muted); }
-.db-status.bad { color: #9f1239; }
+.db-status.bad { color: #9f2d3a; }
 
 .case-list {
   display: grid;
@@ -712,7 +718,7 @@ th {
 }
 
 .slice-miss {
-  color: #9f1239;
+  color: #9f2d3a;
   font-weight: 600;
 }
 
@@ -720,12 +726,28 @@ th {
   margin-top: 12px;
 }
 
+.flow-reading {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.flow-reading h3 {
+  margin: 0 0 6px;
+}
+
+.flow-reading ul {
+  margin: 8px 0 12px;
+  padding-left: 18px;
+}
+
 .slice-view {
   max-height: 480px;
   overflow: auto;
   border: 1px solid var(--line);
-  background: #1d1914;
-  color: #f6f1e8;
+  background: #07111f;
+  color: #e7eef8;
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
@@ -740,12 +762,12 @@ th {
 
 .slice-line.start,
 .slice-line.end {
-  background: #3d3120;
-  color: #f3d7a4;
+  background: #16324f;
+  color: #9ec5ff;
 }
 
 .slice-no {
-  color: #a89880;
+  color: #8eaccf;
 }
 
 .hint {
@@ -763,8 +785,117 @@ th {
   font-size: 13px;
 }
 
+.entry-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 280px));
+  gap: 12px;
+}
+
+.entry-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 720px);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.entry-card h2 {
+  margin-bottom: 4px;
+}
+
+.entry-card .hint {
+  margin: 0 0 14px;
+}
+
+.device-entry-form {
+  grid-template-columns: 1fr;
+}
+
+.scope-tree {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  background: #ebe5d8;
+  border: 1px solid var(--line);
+}
+
+.scope-label {
+  margin: 10px 0 6px;
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.scope-tree .scope-label:first-child {
+  margin-top: 0;
+}
+
+.scope-current {
+  margin: 12px 0 0;
+  font-weight: 600;
+}
+
+#db-body .categories {
+  grid-template-columns: repeat(2, minmax(180px, 280px));
+  margin-top: 12px;
+}
+
+.desk-up {
+  margin: 0 0 12px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.segment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.scope-tree .segment {
+  margin-bottom: 0;
+}
+
+.segment button.active {
+  background: var(--copper);
+  color: #f7fbff;
+  border-color: var(--copper);
+}
+
+.desk-table input,
+.desk-table select,
+.device-entry-form select {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #f7f3ea;
+  color: var(--ink);
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.device-entry-form button {
+  background: var(--copper);
+  color: #f7fbff;
+  border: 0;
+  height: 40px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.entry-card .dropzone {
+  min-height: 220px;
+}
+
 @media (max-width: 1100px) {
   .app {
+    grid-template-columns: 1fr;
+  }
+
+  .entry-grid,
+  .entry-choice {
     grid-template-columns: 1fr;
   }
 }

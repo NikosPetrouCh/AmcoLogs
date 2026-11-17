@@ -9,6 +9,13 @@ namespace AmcoLogs.Infrastructure.Logs;
 public sealed class RemoteLogDownloader : ILogDownloadJob
 {
     private const string OpenSshDirectory = @"C:\Windows\System32\OpenSSH";
+    private static readonly string[] JournalUnits =
+    [
+        "coinman.service",
+        "bnr.service",
+        "printman.service",
+        "frontman.service"
+    ];
     private readonly DeviceAccessSettings _settings;
     private readonly object _gate = new();
     private readonly List<string> _log = [];
@@ -101,6 +108,26 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
             return Fail(device, "no-dates", "No TransactionDate in the Excel for this device.");
         }
 
+        if (dates.Count > 31)
+        {
+            return Fail(device, "error", "Το εύρος είναι πάνω από 31 ημέρες.");
+        }
+
+        string? journal;
+        try
+        {
+            journal = JournalUnit(device.LogService);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Fail(device, "error", exception.Message);
+        }
+
+        if (journal is not null)
+        {
+            return DownloadJournal(device, dates, journal);
+        }
+
         if (string.IsNullOrEmpty(_settings.Password))
         {
             return Fail(device, "error", "Δεν έχει φορτωθεί κωδικός συσκευής. Βάλε τον στο appsettings.Local.json και κάνε restart.");
@@ -147,6 +174,37 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
 
                 Log($"Αποθηκεύτηκε {saved.FullName} ({saved.Length} bytes).");
                 expected.Add(saved.FullName);
+                if (mobile)
+                {
+                    try
+                    {
+                        var extracted = NlogFile.ExtractBeside(saved.FullName);
+                        if (extracted is null)
+                        {
+                            Log($"{device.ServiceAccountId}: το zip δεν έχει .log μέσα.");
+                        }
+                        else
+                        {
+                            Log($"Extract {extracted}.");
+                            expected.Add(extracted);
+                            try
+                            {
+                                TryDelete(saved.FullName);
+                                expected.Remove(saved.FullName);
+                                Log($"Σβήστηκε το τοπικό zip {saved.Name}.");
+                            }
+                            catch (Exception exception)
+                            {
+                                Log($"{device.ServiceAccountId}: το zip δεν σβήστηκε: {exception.Message}");
+                            }
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        Log($"{device.ServiceAccountId}: το unzip απέτυχε: {exception.Message}");
+                    }
+                }
+
                 if (!mobile)
                 {
                     continue;
@@ -169,6 +227,30 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
                 message += " Το zip έμεινε στη συσκευή γιατί το sudo rm απέτυχε.";
             }
 
+            var localPath = destDir;
+            if (TransactionClock.TryParse(device.ClockTime, out var clock))
+            {
+                var slice = new NlogSliceReader().ReadByClock(destDir, clock, null);
+                if (slice.Found)
+                {
+                    var slicePath = SaveSlice(destDir, slice, clock);
+                    localPath = slicePath;
+                    message += $" Η συναλλαγή κρατήθηκε στο {slicePath}. Τα nlog έμειναν στον ίδιο φάκελο.";
+                }
+                else
+                {
+                    message += " Δεν βρέθηκε Selecting product γύρω από την ώρα. Έμεινε ολόκληρο το log.";
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(device.GrepPattern))
+            {
+                var grepPath = SaveGrep(destDir, device.GrepPattern, out var count);
+                localPath = grepPath;
+                message += count > 0
+                    ? $" Το grep κράτησε {count} γραμμές στο {grepPath}. Τα nlog έμειναν στον ίδιο φάκελο."
+                    : $" Το grep δεν βρήκε γραμμές. Το αποτέλεσμα είναι το {grepPath}. Τα nlog έμειναν στον ίδιο φάκελο.";
+            }
+
             return new LogDownloadResult
             {
                 ServiceAccountId = device.ServiceAccountId,
@@ -176,7 +258,7 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
                 Mobility = device.Mobility,
                 Reachable = true,
                 Status = expected.Count > 0 ? "downloaded" : "empty",
-                LocalPath = destDir,
+                LocalPath = localPath,
                 Message = message
             };
         }
@@ -186,6 +268,128 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
             Log($"{device.ServiceAccountId}: {message}");
             return Fail(device, "error", message);
         }
+    }
+
+    private LogDownloadResult DownloadJournal(LogDownloadDeviceRequest device, IReadOnlyList<string> dates, string unit)
+    {
+        if (string.IsNullOrEmpty(_settings.Password))
+        {
+            return Fail(device, "error", "Δεν έχει φορτωθεί κωδικός συσκευής. Βάλε τον στο appsettings.Local.json και κάνε restart.");
+        }
+
+        var user = string.IsNullOrWhiteSpace(_settings.Username) ? "amco" : _settings.Username;
+        var port = IsMobile(device.Mobility) ? 1030 : 8022;
+        var since = $"{dates[0]} 00:00:00";
+        var until = $"{DateOnly.Parse(dates[^1], CultureInfo.InvariantCulture).AddDays(1):yyyy-MM-dd} 00:00:00";
+        var fileName = $"{unit.Replace(".service", "", StringComparison.OrdinalIgnoreCase)}-{Sanitize(device.ServiceAccountId)}.log";
+        var command =
+            $"cd \"$HOME\" && journalctl -u {QuoteShell(unit)} --since {QuoteShell(since)} --until {QuoteShell(until)} > {QuoteShell(fileName)} && pwd";
+        Log($"{device.ServiceAccountId}: {unit}, αρχείο στο home.");
+        try
+        {
+            var home = RunUser(device.IpAddress, port, user, command, 180_000).Trim();
+            var homeLine = home.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
+            if (string.IsNullOrWhiteSpace(homeLine) || homeLine.Contains(' '))
+            {
+                throw new InvalidOperationException("Δεν βρέθηκε το home της συσκευής.");
+            }
+
+            var remoteFile = homeLine.TrimEnd('/') + "/" + fileName;
+            var destRoot = ResolveLocalFolder();
+            var destDir = Path.Combine(destRoot, Sanitize(device.ServiceAccountId));
+            Directory.CreateDirectory(destDir);
+            var localFile = Path.Combine(destDir, fileName);
+            TryDelete(localFile);
+            Log($"sftp {user}@{device.IpAddress}:{remoteFile}");
+            DownloadWithSftp(device.IpAddress, port, user, remoteFile, localFile, 180_000);
+
+            var saved = new FileInfo(localFile);
+            if (!saved.Exists)
+            {
+                throw new InvalidOperationException($"Το {fileName} δεν εμφανίστηκε στο {destDir}.");
+            }
+
+            Log($"Αποθηκεύτηκε {saved.FullName} ({saved.Length} bytes). Ολόκληρο το αρχείο.");
+            var kept = saved.FullName;
+            var journalMessage = saved.Length > 0
+                ? $"Κατέβηκε το {fileName} από το home. Κρατήθηκε ολόκληρο."
+                : $"Το {fileName} κατέβηκε άδειο από το home.";
+            if (!string.IsNullOrWhiteSpace(device.GrepPattern))
+            {
+                var grepPath = SaveGrep(destDir, device.GrepPattern, out var count);
+                kept = grepPath;
+                journalMessage += count > 0
+                    ? $" Το grep κράτησε {count} γραμμές στο {grepPath}."
+                    : $" Το grep δεν βρήκε γραμμές. Το αποτέλεσμα είναι το {grepPath}.";
+            }
+
+            return new LogDownloadResult
+            {
+                ServiceAccountId = device.ServiceAccountId,
+                IpAddress = device.IpAddress,
+                Mobility = device.Mobility,
+                Reachable = true,
+                Status = saved.Length > 0 ? "downloaded" : "empty",
+                LocalPath = kept,
+                Message = journalMessage
+            };
+        }
+        catch (Exception exception)
+        {
+            var message = Redact(exception.Message);
+            Log($"{device.ServiceAccountId}: {message}");
+            return Fail(device, "error", message);
+        }
+    }
+
+    private string RunUser(string ip, int port, string user, string command, int timeoutMs)
+    {
+        Log($"ssh -p {port} {user}@{ip}");
+        Log(command);
+        using var client = Open<SshClient>(ip, port, user);
+        client.Connect();
+        try
+        {
+            using var remote = client.CreateCommand(command);
+            remote.CommandTimeout = TimeSpan.FromMilliseconds(timeoutMs);
+            var output = remote.Execute();
+            var text = Redact((output + "\n" + remote.Error).Trim());
+            if (!string.IsNullOrWhiteSpace(remote.Error))
+            {
+                Log(Redact(remote.Error.Trim()));
+            }
+
+            if (remote.ExitStatus != 0)
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(text)
+                    ? $"Η εντολή στη συσκευή απέτυχε (exit {remote.ExitStatus})."
+                    : text);
+            }
+
+            return output ?? "";
+        }
+        finally
+        {
+            client.Disconnect();
+        }
+    }
+
+    private static string? JournalUnit(string? service)
+    {
+        var name = (service ?? "").Trim();
+        if (name.Length == 0
+            || name.Equals("middleware", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("middleware.service", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!JournalUnits.Contains(name))
+        {
+            throw new InvalidOperationException($"Άγνωστο service: {name}");
+        }
+
+        return JournalUnits.First(unit => unit.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
     private void RunSudo(string ip, int port, string user, string remoteDir, string action, int timeoutMs)
@@ -468,6 +672,62 @@ public sealed class RemoteLogDownloader : ILogDownloadJob
     }
 
     private static string QuoteShell(string value) => "'" + value.Replace("'", "'\\''") + "'";
+
+    private static string SaveSlice(string destDir, LogSliceResult slice, TimeOnly clock)
+    {
+        var day = DayOf(slice.Lines.FirstOrDefault()?.Text) ?? "day";
+        var path = Path.Combine(destDir, $"nlog-slice-{day}-{clock.ToString("HHmm", CultureInfo.InvariantCulture)}.log");
+        File.WriteAllLines(path, slice.Lines.Select(line => line.Text));
+        return path;
+    }
+
+    private static string SaveGrep(string destDir, string pattern, out int count)
+    {
+        var needle = pattern.Trim();
+        if (needle.Length > 200)
+        {
+            needle = needle[..200];
+        }
+
+        var matches = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(destDir, "*.log").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var name = Path.GetFileName(file);
+            if (name.Equals("grep-result.log", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("nlog-slice-", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var lineNumber = 0;
+            foreach (var line in File.ReadLines(file))
+            {
+                lineNumber++;
+                if (line.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add($"{name}:{lineNumber}:{line}");
+                }
+            }
+        }
+
+        count = matches.Count;
+        var path = Path.Combine(destDir, "grep-result.log");
+        File.WriteAllLines(path, matches);
+        return path;
+    }
+
+    private static string? DayOf(string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line) || line.Length < 10)
+        {
+            return null;
+        }
+
+        var day = line[..10];
+        return DateOnly.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+            ? day
+            : null;
+    }
 
     private static void TryDelete(string path)
     {

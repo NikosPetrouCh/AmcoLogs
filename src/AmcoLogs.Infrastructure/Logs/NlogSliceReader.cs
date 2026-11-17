@@ -7,6 +7,7 @@ namespace AmcoLogs.Infrastructure.Logs;
 public sealed class NlogSliceReader
 {
     private const int MaxBodyLines = 800;
+    private const int MaxWholeLines = 4000;
     private static readonly Regex LinePattern = new(
         @"^(?<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\|",
         RegexOptions.Compiled);
@@ -58,6 +59,104 @@ public sealed class NlogSliceReader
         return best?.Result ?? Missing("Δε βρέθηκε η συναλλαγή.");
     }
 
+    public LogSliceResult ReadByClock(string path, TimeOnly clock, DateTime? day)
+    {
+        var files = PreferPlainLogs(NlogFile.Enumerate(path));
+        if (files.Count == 0)
+        {
+            return Missing("Δεν υπάρχει αρχείο log.");
+        }
+
+        var wantedDay = day?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        Candidate? best = null;
+        foreach (var file in files)
+        {
+            var fileDay = NlogFile.DayFromName(file);
+            if (wantedDay is not null && fileDay is not null && !string.Equals(fileDay, wantedDay, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            using var stream = NlogFile.OpenRead(file);
+            var hit = ScanClock(stream, clock, file);
+            if (hit is null)
+            {
+                continue;
+            }
+
+            if (best is null || hit.Value.Seconds < best.Value.Seconds)
+            {
+                best = hit;
+            }
+        }
+
+        return best?.Result ?? Missing("Δεν υπάρχει Selecting product γύρω από αυτή την ώρα.");
+    }
+
+    public LogSliceResult ReadWhole(string path)
+    {
+        var files = PreferPlainLogs(NlogFile.Enumerate(path));
+        if (files.Count == 0)
+        {
+            return Missing("Δεν υπάρχει αρχείο log.");
+        }
+
+        var lines = new List<LogSliceLine>();
+        string? firstName = null;
+        var truncated = false;
+        foreach (var file in files)
+        {
+            firstName ??= Path.GetFileName(file);
+            using var stream = NlogFile.OpenRead(file);
+            using var reader = new StreamReader(stream);
+            var lineNumber = 0;
+            string? raw;
+            while ((raw = reader.ReadLine()) is not null)
+            {
+                lineNumber++;
+                if (lines.Count >= MaxWholeLines)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                lines.Add(new LogSliceLine
+                {
+                    LineNumber = lineNumber,
+                    Text = raw,
+                    Role = lines.Count == 0 ? "start" : "between"
+                });
+            }
+
+            if (truncated)
+            {
+                break;
+            }
+        }
+
+        if (lines.Count > 0)
+        {
+            lines[^1] = new LogSliceLine
+            {
+                LineNumber = lines[^1].LineNumber,
+                Text = lines[^1].Text,
+                Role = "end"
+            };
+        }
+
+        return new LogSliceResult
+        {
+            Found = lines.Count > 0,
+            Message = truncated
+                ? "Ολόκληρο το αρχείο, κομμένο στις 4000 γραμμές."
+                : "Ολόκληρο το αρχείο.",
+            LogFileName = firstName,
+            LineStart = lines.Count == 0 ? 0 : lines[0].LineNumber,
+            LineEnd = lines.Count == 0 ? 0 : lines[^1].LineNumber,
+            Lines = lines
+        };
+    }
+
     private static Candidate? Scan(Stream log, string wanted, DateTime? excelTime, string file)
     {
         Candidate? best = null;
@@ -88,6 +187,107 @@ public sealed class NlogSliceReader
         }
 
         return best;
+    }
+
+    private static Candidate? ScanClock(Stream log, TimeOnly clock, string file)
+    {
+        Candidate? best = null;
+        Window? open = null;
+        using var reader = new StreamReader(log);
+        var lineNumber = 0;
+        string? raw;
+        while ((raw = reader.ReadLine()) is not null)
+        {
+            lineNumber++;
+            if (!IsSelectingProduct(raw))
+            {
+                open?.Add(lineNumber, raw);
+                continue;
+            }
+
+            if (open is not null)
+            {
+                best = ConsiderClock(open, clock, file, raw, lineNumber, best);
+            }
+
+            open = Window.Start(lineNumber, raw);
+        }
+
+        if (open is not null)
+        {
+            best = ConsiderClock(open, clock, file, null, 0, best);
+        }
+
+        return best;
+    }
+
+    private static Candidate? ConsiderClock(
+        Window open,
+        TimeOnly clock,
+        string file,
+        string? nextSelecting,
+        int nextLine,
+        Candidate? best)
+    {
+        if (open.StartTime is null)
+        {
+            return best;
+        }
+
+        var target = open.StartTime.Value.Date + clock.ToTimeSpan();
+        if (open.StartTime.Value > target)
+        {
+            return best;
+        }
+
+        var nextTime = nextSelecting is null ? (DateTime?)null : TimeOf(nextSelecting);
+        if (nextTime is not null && nextTime.Value <= target)
+        {
+            return best;
+        }
+
+        var lines = new List<LogSliceLine>
+        {
+            new() { LineNumber = open.LineStart, Text = open.StartText, Role = "start" }
+        };
+        lines.AddRange(open.Body.Select(line => new LogSliceLine
+        {
+            LineNumber = line.Number,
+            Text = line.Text,
+            Role = "between"
+        }));
+        if (nextSelecting is not null)
+        {
+            lines.Add(new LogSliceLine
+            {
+                LineNumber = nextLine,
+                Text = nextSelecting,
+                Role = "end"
+            });
+        }
+
+        var distance = (target - open.StartTime.Value).TotalSeconds;
+        var result = new LogSliceResult
+        {
+            Found = true,
+            Message = SliceMessage(nextSelecting is not null, open.Truncated),
+            LogFileName = Path.GetFileName(file),
+            LineStart = open.LineStart,
+            LineEnd = nextSelecting is null ? open.LastLine : nextLine,
+            Lines = lines
+        };
+        if (best is null || distance < best.Value.Seconds)
+        {
+            return new Candidate(distance, result);
+        }
+
+        return best;
+    }
+
+    private static IReadOnlyList<string> PreferPlainLogs(IReadOnlyList<string> files)
+    {
+        var plain = files.Where(file => !file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToArray();
+        return plain.Length > 0 ? plain : files;
     }
 
     private static Candidate? Consider(
@@ -201,9 +401,23 @@ public sealed class NlogSliceReader
             return null;
         }
 
+        var text = match.Groups["time"].Value;
+        var dot = text.LastIndexOf('.');
+        if (dot < 0)
+        {
+            return null;
+        }
+
+        var fraction = text[(dot + 1)..];
+        if (fraction.Length > 7)
+        {
+            fraction = fraction[..7];
+        }
+
+        var normalized = text[..(dot + 1)] + fraction.PadRight(7, '0');
         return DateTime.TryParseExact(
-            match.Groups["time"].Value,
-            "yyyy-MM-dd HH:mm:ss.ffff",
+            normalized,
+            "yyyy-MM-dd HH:mm:ss.fffffff",
             CultureInfo.InvariantCulture,
             DateTimeStyles.None,
             out var parsed)

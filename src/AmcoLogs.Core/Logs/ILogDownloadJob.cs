@@ -7,6 +7,9 @@ public sealed class LogDownloadDeviceRequest
     public required string IpAddress { get; init; }
     public bool PingReachable { get; init; }
     public List<string> LogDates { get; init; } = [];
+    public string? LogService { get; init; }
+    public string? ClockTime { get; init; }
+    public string? GrepPattern { get; init; }
 }
 
 public sealed class LogDownloadResult

@@ -32,7 +32,9 @@ public static class IpDirectory
             IpAddress = ip.Trim(),
             BusNo = string.IsNullOrWhiteSpace(bus) ? null : bus.Trim(),
             Mobility = mobility,
-            Source = source
+            Source = source,
+            Station = FirstNonEmpty(fromJson?.Station),
+            Terminal = FirstNonEmpty(fromJson?.Terminal)
         };
     }
 

@@ -36,6 +36,75 @@ dbBody.addEventListener("click", (event) => {
   const resume = event.target.closest("[data-resume-batch]");
   if (resume) {
     resumeBatch(resume.dataset.resumeBatch);
+    return;
+  }
+  const up = event.target.closest("[data-desk-up]");
+  if (up) {
+    if (currentView === "general" && generalMode) {
+      generalMode = null;
+    } else if (currentView === "errors" && errorView) {
+      errorView = null;
+    } else if (deskOperator === "OASA" && deskNetwork) {
+      deskNetwork = null;
+      generalMode = null;
+      errorView = null;
+    } else {
+      deskOperator = null;
+      deskNetwork = null;
+      generalMode = null;
+      errorView = null;
+    }
+    renderDatabase();
+    return;
+  }
+  const operator = event.target.closest("[data-desk-operator]");
+  if (operator) {
+    deskOperator = operator.dataset.deskOperator;
+    deskNetwork = null;
+    generalMode = null;
+    errorView = null;
+    renderDatabase();
+    return;
+  }
+  const network = event.target.closest("[data-desk-network]");
+  if (network) {
+    deskNetwork = network.dataset.deskNetwork;
+    generalMode = null;
+    errorView = null;
+    renderDatabase();
+    return;
+  }
+  const mode = event.target.closest("[data-general-mode]");
+  if (mode) {
+    generalMode = mode.dataset.generalMode;
+    renderExcelArchive();
+    return;
+  }
+  const errorMode = event.target.closest("[data-error-view]");
+  if (errorMode) {
+    errorView = errorMode.dataset.errorView;
+    renderErrorReports();
+    return;
+  }
+  const openCase = event.target.closest("[data-desk-resume]");
+  if (openCase) {
+    resumeDeskCase(openCase.dataset.deskResume);
+  }
+});
+dbBody.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target.dataset.caseDate) {
+    patchDeskCase(target.dataset.caseDate, { hasFileDate: true, fileDate: target.value || null });
+  } else if (target.dataset.caseFault) {
+    patchDeskCase(target.dataset.caseFault, { hasFaultType: true, faultType: target.value });
+  } else if (target.dataset.caseConclusion) {
+    patchDeskCase(target.dataset.caseConclusion, { hasConclusion: true, conclusion: target.value });
+  } else if (target.dataset.lineLogs) {
+    patchDeskLine(target.dataset.lineLogs, { logsDownloaded: target.checked });
+  } else if (target.dataset.lineFault) {
+    patchDeskLine(target.dataset.lineFault, { hasFaultType: true, faultType: target.value });
+  } else if (target.dataset.lineConclusion) {
+    patchDeskLine(target.dataset.lineConclusion, { hasConclusion: true, conclusion: target.value });
   }
 });
 const kicker = document.querySelector("#kicker");
@@ -48,12 +117,37 @@ const ipBody = document.querySelector("#ip-body");
 const dlBody = document.querySelector("#dl-body");
 const prBody = document.querySelector("#pr-body");
 const stepProcess = document.querySelector("#step-process");
+const deviceEntry = document.querySelector("#device-entry");
+const deviceEntryError = document.querySelector("#device-entry-error");
+const deviceNetwork = document.querySelector("#device-network");
+const deviceOperator = deviceEntry.querySelector("[name=operator]");
+deviceOperator.addEventListener("change", syncEntryNetwork);
+syncEntryNetwork();
+deviceEntry.querySelector("#device-search-mode").addEventListener("change", syncDeviceSearch);
+deviceEntry.querySelector("#device-log-service").addEventListener("change", syncDeviceSearch);
+syncDeviceSearch();
+document.querySelector("#entry-choice").addEventListener("click", (event) => {
+  const card = event.target.closest("[data-entry]");
+  if (card) {
+    showEntryKind(card.dataset.entry);
+  }
+});
+document.querySelector("#entry-back").addEventListener("click", () => showEntryKind(null));
+
+function showEntryKind(kind) {
+  const choice = document.querySelector("#entry-choice");
+  const work = document.querySelector("#entry-work");
+  choice.hidden = Boolean(kind);
+  work.hidden = !kind;
+  document.querySelector("#entry-device").hidden = kind !== "device";
+  document.querySelector("#entry-file").hidden = kind !== "exceptions";
+}
 
 const STEP_COPY = {
   1: {
     kicker: "Βήμα 1 από 4",
-    title: "Εισαγωγή Excel",
-    lede: "Ό,τι δεν είναι CTVM και 8 ψηφία, και όλος ο τύπος 04, μένουν έξω. Στις IP περνάει μόνο ο τύπος 02 που δεν έχει ποσό 0,02. Το YES και το NO βγαίνουν στο πόρισμα."
+    title: "Εισαγωγή",
+    lede: ""
   },
   2: {
     kicker: "Βήμα 2 από 4",
@@ -76,7 +170,7 @@ const DB_COPY = {
   errors: {
     kicker: "Database",
     title: "Error reports",
-    lede: "Πορίσματα ανά Transaction ID: ERROR μέσα στο παράθυρο της συναλλαγής του Excel."
+    lede: "Κάθε καταχώρηση είναι μία συσκευή, ένας τύπος σφάλματος και η ημερομηνία της. Φαίνεται ανά συσκευή ή ανά τύπο."
   },
   ips: {
     kicker: "Database",
@@ -86,7 +180,7 @@ const DB_COPY = {
   general: {
     kicker: "Database",
     title: "General",
-    lede: "Κάθε Excel μένει εδώ με τις γραμμές του πορίσματος. Διάλεξε ημέρα, μετά το αρχείο, και συνέχισε ό,τι εκκρεμεί."
+    lede: "Μπαίνεις στο OSETH ή στον OASA. Μέσα στον OASA είναι το TRAM και το METRO. Το Excel είναι τα Daily Exceptions. Το τραμ έχει μόνο Devices."
   }
 };
 
@@ -94,6 +188,15 @@ let currentStep = 1;
 let currentView = "flow";
 let importedRows = [];
 let fileName = "";
+let importProfile = "OSETH";
+let entryOperator = null;
+let entryNetwork = null;
+let deskOperator = null;
+let deskNetwork = null;
+let generalMode = null;
+let errorView = null;
+let activeCaseId = null;
+let activeCaseLines = [];
 let devices = [];
 let reachedIps = false;
 let lastFindings = [];
@@ -126,6 +229,11 @@ dropzone.addEventListener("drop", (event) => {
   if (file) {
     uploadExcel(file);
   }
+});
+
+deviceEntry.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitDeviceEntry(new FormData(deviceEntry));
 });
 
 document.querySelector(".pipeline").addEventListener("click", (event) => {
@@ -185,8 +293,8 @@ async function uploadExcel(file) {
 
 function renderImport(payload) {
   const importData = payload.import;
-    importedRows = importData.rows || [];
-    alert(JSON.stringify(importedRows[0], null, 2));
+  importedRows = importData.rows || [];
+  importProfile = importData.profile || "OSETH";
   fileName = importData.fileName;
   refreshDevices();
   dropzone.classList.add("compact");
@@ -196,19 +304,207 @@ function renderImport(payload) {
   lastFindings = [];
 
   const savedNote = payload.saved
-    ? `Στο General: ${payload.saved.title}. ${payload.saved.yesCount} YES, ${payload.saved.pendingCount} εκκρεμεί.`
+    ? `Στο General: ${payload.saved.title}. ${payload.saved.yesCount} YES, ${payload.saved.pendingCount} εκκρεμεί. ${payload.persistMessage || ""}`
     : (payload.persistMessage || "Το αρχείο διαβάστηκε.");
   const warnings = (importData.warnings || []).join(" ");
   setStatus(savedNote + (warnings ? " " + warnings : ""));
 
   summary.hidden = false;
+  const profileLabel = importProfile === "OASA" ? "ΟΑΣΑ" : "OSETH";
   summary.innerHTML = `
     <h2>${escapeHtml(fileName)}</h2>
-    <p>${countLabel(importedRows.length, "γραμμή", "γραμμές")} στο Excel. Η απόφαση YES ή NO φαίνεται στο πόρισμα.</p>
+    <p>${profileLabel} · ${countLabel(importedRows.length, "γραμμή", "γραμμές")}.${importProfile === "OASA" ? " Το CTVM και η IP βγαίνουν από τον κωδικό τερματικού." : " Η απόφαση YES ή NO φαίνεται στο πόρισμα."}</p>
   `;
 
-  renderScreen();
+  if (importProfile === "OASA") {
+    renderOasaScreen();
+  } else {
+    renderScreen();
+  }
   renderApp();
+}
+
+async function submitDeviceEntry(data) {
+  const ctvm = String(data.get("ctvm") || "").trim().toUpperCase();
+  const logDate = String(data.get("logDate") || "").trim();
+  const operator = String(data.get("operator") || "OSETH");
+  const network = operator === "OASA" ? String(data.get("network") || "TRAM") : null;
+  const faultType = String(data.get("faultType") || "").trim();
+  const searchMode = String(data.get("searchMode") || "transaction");
+  const logService = String(data.get("logService") || "middleware");
+  const clockTime = String(data.get("clockTime") || "").trim();
+  const rangeFrom = String(data.get("rangeFrom") || "").trim();
+  const rangeUntil = String(data.get("rangeUntil") || "").trim();
+  const grepText = String(data.get("grepText") || "").trim();
+  if (!/^CTVM\d{8}$/.test(ctvm)) {
+    setDeviceError("Το CTVM πρέπει να είναι CTVM και 8 ψηφία.");
+    return;
+  }
+  if (searchMode === "transaction" && logService === "middleware" && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clockTime)) {
+    setDeviceError("Η ώρα της συναλλαγής γράφεται 08:23.");
+    return;
+  }
+  if (searchMode === "transaction" && !logDate) {
+    setDeviceError("Χρειάζεται η ημερομηνία του log.");
+    return;
+  }
+  if (searchMode === "range" && (!rangeFrom || !rangeUntil || rangeUntil < rangeFrom)) {
+    setDeviceError("Το εύρος χρειάζεται από και έως, με το έως μετά το από.");
+    return;
+  }
+  if (searchMode === "range" && daysBetween(rangeFrom, rangeUntil).length > 31) {
+    setDeviceError("Το εύρος είναι πάνω από 31 ημέρες.");
+    return;
+  }
+  if (searchMode === "range" && !grepText) {
+    setDeviceError("Στο εύρος ημερομηνιών γράψε το log που θα γίνει grep.");
+    return;
+  }
+  setDeviceError("");
+  const lookedUp = await fetch("/api/devices/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ serviceAccountIds: [ctvm] })
+  }).then((response) => response.ok ? response.json() : { hits: [] }).catch(() => ({ hits: [] }));
+  const hit = (lookedUp.hits || [])[0] || {};
+  entryOperator = operator;
+  entryNetwork = network;
+  importProfile = "DEVICE";
+  fileName = ctvm;
+  importedRows = [{
+    rowNumber: 1,
+    mobility: classifyMobility(ctvm),
+    disposition: "NeedsIp",
+    decision: null,
+    screenReason: "Καταχώρηση μίας συσκευής.",
+    oasaTerminal: hit.terminal || null,
+    stationName: hit.station || null,
+    logService,
+    operator,
+    clockTime: searchMode === "transaction" && logService === "middleware" ? clockTime : null,
+    searchMode,
+    rangeFrom: searchMode === "range" ? rangeFrom : null,
+    rangeUntil: searchMode === "range" ? rangeUntil : null,
+    grepText: searchMode === "range" ? grepText : null,
+    immediate: {
+      serviceAccountId: ctvm,
+      transactionDate: searchMode === "range" ? rangeFrom : logDate,
+      amount: null,
+      eticketTransactionResult: null,
+      rrn: null,
+      transactionId: null
+    }
+  }];
+  refreshDevices();
+  dropzone.classList.remove("compact");
+  currentStep = 1;
+  currentView = "flow";
+  reachedIps = false;
+  lastFindings = [];
+  const filed = await postDeskCase({
+    operator,
+    network,
+    origin: "device",
+    fileName: ctvm,
+    fileDate: logDate || null,
+    faultType: faultType || null,
+    serviceAccountId: ctvm,
+    lines: [{
+      rowNumber: 1,
+      serviceAccountId: ctvm,
+      faultType: faultType || null,
+      terminalCode: hit.terminal || null,
+      stationName: hit.station || null,
+      transactionDate: logDate ? `${logDate}T00:00:00` : null
+    }]
+  });
+  const place = operator === "OASA" ? `OASA · ${network}` : "OSETH";
+  const stationNote = hit.station ? ` Σταθμός: ${hit.station}.` : "";
+  setStatus(`${ctvm}.${stationNote} ${filed && filed.error ? filed.error : `Μπήκε στις συσκευές του ${place}. Η IP είναι στο επόμενο βήμα.`}`);
+  summary.hidden = false;
+  summary.innerHTML = `
+    <h2>${escapeHtml(ctvm)}</h2>
+    <p>Μία συσκευή.${hit.station ? ` Σταθμός ${escapeHtml(hit.station)}.` : ""}${hit.terminal ? ` Τερματικό ${escapeHtml(hit.terminal)}.` : ""} Η IP συμπληρώνεται στο επόμενο βήμα.${logDate ? ` Ημερομηνία log: ${escapeHtml(logDate)}.` : " Χωρίς ημερομηνία log."}</p>
+  `;
+  renderDeviceScreen();
+  renderApp();
+}
+
+function setDeviceError(text) {
+  deviceEntryError.hidden = !text;
+  deviceEntryError.textContent = text;
+}
+
+function classifyMobility(id) {
+  const digits = String(id || "").replace(/\D/g, "");
+  if (digits.startsWith("36")) return "Fixed";
+  if (digits.startsWith("4")) return "Mobile";
+  return "Unknown";
+}
+
+function renderDeviceScreen() {
+  const device = devices[0];
+  categories.hidden = false;
+  categories.innerHTML = `
+    <div class="result-card ip">
+      <div class="result-code word">${escapeHtml(device?.serviceAccountId || "")}</div>
+      <p class="result-meta">${escapeHtml(device?.stationName || device?.station || "χωρίς σταθμό")} · ${mobilityLabel(device?.mobility)}</p>
+    </div>
+  `;
+  selection.hidden = false;
+  selection.innerHTML = `
+    <h2>Καταχωρήθηκε</h2>
+    <p>Η IP δεν μπαίνει εδώ. Στο επόμενο βήμα τη φέρνει η βάση ή τη γράφεις εσύ, και μετά γίνονται ping και logs όπως σε κάθε συσκευή.</p>
+    <div class="actions">
+      <button type="button" class="primary" id="to-ips" onclick="goToStep(2)">Συνέχεια στις IPs</button>
+    </div>
+  `;
+}
+
+function renderOasaScreen() {
+  const ready = importedRows.filter((row) => row.disposition === "NeedsIp" && row.resolvedIp);
+  const needsIp = importedRows.filter((row) => row.disposition === "NeedsIp" && !row.resolvedIp);
+  const unmatched = importedRows.filter((row) => row.disposition !== "NeedsIp");
+  categories.hidden = false;
+  categories.innerHTML = `
+    <div class="result-card yes">
+      <div class="result-code">${ready.length}</div>
+      <p class="result-meta">με CTVM και IP</p>
+    </div>
+    <div class="result-card ip">
+      <div class="result-code">${needsIp.length}</div>
+      <p class="result-meta">με CTVM, χωρίς IP</p>
+    </div>
+    <div class="result-card out">
+      <div class="result-code">${unmatched.length}</div>
+      <p class="result-meta">χωρίς αντιστοιχία</p>
+    </div>
+  `;
+  selection.hidden = false;
+  selection.innerHTML = `
+    <h2>ΟΑΣΑ</h2>
+    <p>Ο κωδικός τερματικού ψάχνει στο Ips_Oasa.json το CTVM, την IP, τον αριθμό τερματικού και το όνομα σταθμού. Το ping και τα logs είναι τα ίδια με τον OSETH.</p>
+    ${importedRows.length ? `<details open><summary>Γραμμές · ${importedRows.length}</summary>${oasaTable(importedRows)}</details>` : ""}
+    <div class="actions">
+      <button type="button" class="primary" id="to-ips" onclick="goToStep(${devices.length ? 2 : 4})" ${importedRows.length ? "" : "disabled"}>${devices.length ? "Συνέχεια στις IPs" : "Συνέχεια στο πόρισμα"}</button>
+      <button type="button" onclick="fileOasaCase('METRO')">Καταχώρηση Daily Exceptions · METRO</button>
+    </div>
+  `;
+}
+
+function oasaTable(rows) {
+  return renderTable(
+    ["Τερματικό", "CTVM", "IP", "Ημερομηνία", "Ποσό", "Κωδ. κατάστασης", "Λόγος"],
+    rows.map((row) => [
+      row.oasaTerminal || "",
+      row.immediate?.serviceAccountId || "",
+      row.resolvedIp || "",
+      row.immediate?.transactionDate ? String(row.immediate.transactionDate).slice(0, 16).replace("T", " ") : "",
+      row.immediate?.amount ?? "",
+      row.statusCode || "",
+      row.screenReason || ""
+    ])
+  );
 }
 
 function renderScreen() {
@@ -326,6 +622,7 @@ function renderApp() {
     kicker.textContent = copy.kicker;
     stageTitle.textContent = copy.title;
     stageLede.textContent = copy.lede;
+    stageLede.hidden = !copy.lede;
     stepExcel.hidden = true;
     stepIps.hidden = true;
     stepDownload.hidden = true;
@@ -336,10 +633,11 @@ function renderApp() {
     return;
   }
 
-  const copy = STEP_COPY[currentStep];
+  const copy = stageCopy();
   kicker.textContent = copy.kicker;
   stageTitle.textContent = copy.title;
   stageLede.textContent = copy.lede;
+  stageLede.hidden = !copy.lede;
   dbView.hidden = true;
   stepExcel.hidden = currentStep !== 1;
   stepIps.hidden = currentStep !== 2;
@@ -355,6 +653,27 @@ function renderApp() {
   if (currentStep === 4) {
     renderProcess();
   }
+}
+
+function stageCopy() {
+  if (currentStep !== 1) {
+    return STEP_COPY[currentStep];
+  }
+  if (importProfile === "OASA" && importedRows.length) {
+    return {
+      ...STEP_COPY[1],
+      title: "Αρχείο ΟΑΣΑ",
+      lede: ""
+    };
+  }
+  if (importProfile === "DEVICE" && importedRows.length) {
+    return {
+      ...STEP_COPY[1],
+      title: "Μία συσκευή",
+      lede: ""
+    };
+  }
+  return STEP_COPY[1];
 }
 
 function renderPipeline() {
@@ -385,13 +704,398 @@ async function renderDatabase() {
   }
 }
 
+const ERROR_KINDS = [
+  ["restart", "Restart"],
+  ["printer", "Not Operational Printer"],
+  ["database_error", "Database error"],
+  ["customer_mistake", "Mistake of a customer"],
+  ["card_reader", "Card reader"],
+  ["network", "Network"],
+  ["power", "Power"],
+  ["amount_mismatch", "Amount mismatch"],
+  ["other", "Other"]
+];
+
+function errorKindLabel(code) {
+  return ERROR_KINDS.find(([kind]) => kind === code)?.[1] || code || "";
+}
+
+function registrationsLabel(count) {
+  return count === 1 ? "1 καταχώρηση" : `${count} καταχωρήσεις`;
+}
+
+function todayInput() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function isOasaFlow() {
+  return importProfile === "OASA" || (importProfile === "DEVICE" && entryOperator === "OASA");
+}
+
+function scopePlace() {
+  if (deskOperator === "OSETH") {
+    return "OSETH";
+  }
+  return deskNetwork ? `OASA / ${deskNetwork}` : "OASA";
+}
+
+function folderCard(attr, title, meta) {
+  return `<button type="button" class="result-card" ${attr}><strong>${escapeHtml(title)}</strong><p class="result-meta">${escapeHtml(meta)}</p></button>`;
+}
+
+function deskCrumb() {
+  const parts = [];
+  if (deskOperator) {
+    parts.push(deskOperator);
+  }
+  if (deskOperator === "OASA" && deskNetwork) {
+    parts.push(deskNetwork);
+  }
+  if (currentView === "general" && generalMode === "exceptions") {
+    parts.push("Daily Exceptions");
+  }
+  if (currentView === "general" && generalMode === "devices") {
+    parts.push("Devices");
+  }
+  if (currentView === "errors" && errorView === "device") {
+    parts.push("Κατά συσκευή");
+  }
+  if (currentView === "errors" && errorView === "kind") {
+    parts.push("Κατά τύπο σφάλματος");
+  }
+  return parts.join(" / ");
+}
+
+function deskAtContent() {
+  if (!deskOperator) {
+    return false;
+  }
+  if (deskOperator === "OASA" && !deskNetwork) {
+    return false;
+  }
+  if (currentView === "general" && generalMode !== "exceptions" && generalMode !== "devices") {
+    return false;
+  }
+  if (currentView === "general" && generalMode === "exceptions" && deskNetwork === "TRAM") {
+    return false;
+  }
+  if (currentView === "errors" && errorView !== "device" && errorView !== "kind") {
+    return false;
+  }
+  return true;
+}
+
+function networkCards() {
+  const tram = folderCard('data-desk-network="TRAM"', "TRAM", currentView === "general" ? "Devices" : "Οι συσκευές");
+  const metro = folderCard('data-desk-network="METRO"', "METRO", currentView === "general" ? "Daily Exceptions και Devices" : "Οι συσκευές");
+  return currentView === "general" ? `${metro}${tram}` : `${tram}${metro}`;
+}
+
+function renderDeskFolders() {
+  if (!deskOperator) {
+    return `
+      <div class="categories">
+        ${folderCard('data-desk-operator="OSETH"', "OSETH", currentView === "general" ? "Daily Exceptions και Devices" : "Οι συσκευές")}
+        ${folderCard('data-desk-operator="OASA"', "OASA", "TRAM και METRO")}
+      </div>`;
+  }
+  const back = `<button type="button" class="desk-up" data-desk-up="1">Πίσω</button>`;
+  if (deskOperator === "OASA" && !deskNetwork) {
+    return `
+      ${back}
+      <p class="scope-current">OASA</p>
+      <div class="categories">
+        ${networkCards()}
+      </div>`;
+  }
+  if (currentView === "general" && !generalMode) {
+    const choices = deskNetwork === "TRAM"
+      ? folderCard('data-general-mode="devices"', "Devices", "Κάθε συσκευή χωριστά")
+      : `
+        ${folderCard('data-general-mode="exceptions"', "Daily Exceptions", "Αρχείο Excel")}
+        ${folderCard('data-general-mode="devices"', "Devices", "Κάθε συσκευή χωριστά")}
+      `;
+    return `
+      ${back}
+      <p class="scope-current">${escapeHtml(deskCrumb())}</p>
+      <div class="categories">${choices}</div>`;
+  }
+  if (currentView === "errors" && !errorView) {
+    return `
+      ${back}
+      <p class="scope-current">${escapeHtml(deskCrumb())}</p>
+      <div class="categories">
+        ${folderCard('data-error-view="device"', "Κατά συσκευή", "Κάθε καταχώρηση πάνω στη συσκευή")}
+        ${folderCard('data-error-view="kind"', "Κατά τύπο σφάλματος", "Οι συσκευές με το ίδιο πρόβλημα")}
+      </div>`;
+  }
+  return `
+    ${back}
+    <p class="scope-current">${escapeHtml(deskCrumb())}</p>`;
+}
+
+function syncEntryNetwork() {
+  if (deviceNetwork) {
+    deviceNetwork.hidden = deviceOperator.value !== "OASA";
+  }
+}
+
+function syncDeviceSearch() {
+  const mode = deviceEntry.querySelector("#device-search-mode").value;
+  const service = deviceEntry.querySelector("#device-log-service").value;
+  const range = mode === "range";
+  const clock = mode === "transaction" && service === "middleware";
+  deviceEntry.querySelector("#device-log-date").hidden = range;
+  deviceEntry.querySelector("#device-clock").hidden = !clock;
+  deviceEntry.querySelector("#device-range-from").hidden = !range;
+  deviceEntry.querySelector("#device-range-until").hidden = !range;
+  deviceEntry.querySelector("#device-grep").hidden = !range;
+}
+
+
+function deskQuery() {
+  const network = deskOperator === "OASA" ? `&network=${deskNetwork}` : "";
+  return `operator=${deskOperator}${network}`;
+}
+
+function deskScopeBody(extra) {
+  return {
+    operator: deskOperator,
+    network: deskOperator === "OASA" ? deskNetwork : null,
+    ...extra
+  };
+}
+
+async function deskFetch(url, options) {
+  try {
+    const response = await fetch(url, options);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { error: payload.message || "Η MySQL δεν είναι συνδεδεμένη.", payload };
+    }
+    return { error: null, payload };
+  } catch {
+    return { error: "Η MySQL δεν απάντησε.", payload: null };
+  }
+}
+
+async function postDeskCase(body) {
+  const result = await deskFetch("/api/desk/cases", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!result.error && result.payload?.id) {
+    activeCaseId = result.payload.id;
+  }
+  return result;
+}
+
+async function fileOasaCase(network) {
+  if (network !== "METRO") {
+    setStatus("Το τραμ δεν παίρνει Excel. Το αρχείο ΟΑΣΑ μπαίνει στα Daily Exceptions του METRO.");
+    return;
+  }
+  deskOperator = "OASA";
+  deskNetwork = network;
+  generalMode = "exceptions";
+  const lines = importedRows
+    .filter((row) => row.disposition === "NeedsIp" || row.disposition === "AutomaticYes")
+    .map((row) => ({
+      rowNumber: row.rowNumber,
+      serviceAccountId: row.immediate?.serviceAccountId,
+      resultCode: row.statusCode || row.immediate?.eticketTransactionResult,
+      decision: row.decision,
+      transactionId: row.immediate?.transactionId,
+      transactionDate: row.immediate?.transactionDate,
+      amount: row.immediate?.amount,
+      faultType: row.statusCode || null,
+      terminalCode: row.oasaTerminal || null,
+      stationName: row.stationName || null
+    }));
+  const result = await postDeskCase({
+    operator: "OASA",
+    network,
+    origin: "excel",
+    fileName,
+    lines
+  });
+  setStatus(result.error || `Το αρχείο μπήκε στο General ΟΑΣΑ ${network}.`);
+}
+
+async function patchDeskCase(id, fields) {
+  await deskFetch(`/api/desk/cases/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(deskScopeBody(fields))
+  });
+}
+
+async function patchDeskLine(id, fields) {
+  await deskFetch(`/api/desk/lines/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(deskScopeBody(fields))
+  });
+}
+
+function noteDeskLogs(serviceAccountId) {
+  activeCaseLines
+    .filter((line) => line.serviceAccountId === serviceAccountId && !line.logsDownloaded)
+    .forEach((line) => {
+      line.logsDownloaded = true;
+      patchDeskLine(line.id, { logsDownloaded: true, hasInvestigationStatus: true, investigationStatus: "logs" });
+    });
+}
+
+async function resumeDeskCase(caseId) {
+  const result = await deskFetch(`/api/desk/lines?${deskQuery()}&caseId=${caseId}`);
+  const lines = Array.isArray(result.payload) ? result.payload : [];
+  if (!lines.length) {
+    return;
+  }
+  activeCaseId = caseId;
+  activeCaseLines = lines;
+  fileName = lines[0].fileName || lines[0].serviceAccountId || "";
+  importProfile = lines[0].origin === "device" ? "DEVICE" : deskOperator;
+  importedRows = lines.map((line) => ({
+    rowNumber: line.rowNumber,
+    mobility: classifyMobility(line.serviceAccountId),
+    disposition: line.decision === "YES" ? "AutomaticYes" : "NeedsIp",
+    decision: line.decision === "YES" || line.decision === "NO" ? line.decision : null,
+    screenReason: line.faultType || "Από το General.",
+    operator: deskOperator === "OASA" ? "OASA" : "OSETH",
+    immediate: {
+      serviceAccountId: line.serviceAccountId,
+      amount: line.amount,
+      eticketTransactionResult: line.resultCode,
+      transactionId: line.transactionId,
+      transactionDate: line.transactionDate,
+      rrn: null
+    }
+  }));
+  currentView = "flow";
+  reachedIps = false;
+  lastFindings = [];
+  refreshDevices();
+  if (devices.length) {
+    await goToStep(2);
+    return;
+  }
+  currentStep = 4;
+  renderApp();
+}
+
 async function renderErrorReports() {
-  const stored = lastFindings.length ? lastFindings : await fetchJson("/api/logs/findings");
+  if (!deskAtContent()) {
+    dbBody.innerHTML = `<h2>Error reports</h2>${renderDeskFolders()}`;
+    return;
+  }
+  const result = await deskFetch(`/api/desk/errors?${deskQuery()}`);
+  const rows = Array.isArray(result.payload) ? result.payload : [];
+  const hint = result.error || (errorView === "kind"
+    ? "Κάθε γραμμή είναι μία συσκευή με αυτό το σφάλμα, και η ημερομηνία της καταχώρησης. Η ίδια συσκευή ξαναφαίνεται αν το σφάλμα καταχωρήθηκε δεύτερη φορά."
+    : "Κάθε γραμμή είναι μία καταχώρηση. Δύο γραμμές στην ίδια συσκευή σημαίνουν δύο καταχωρήσεις σφάλματος.");
   dbBody.innerHTML = `
     <h2>Error reports</h2>
-    <p class="hint">${stored.length ? `${stored.length} πορίσματα.` : "Δεν υπάρχουν ακόμα πορίσματα. Τρέξε το βήμα 4 στο flow."}</p>
-    ${stored.length ? renderFindings(stored) : ""}
+    ${renderDeskFolders()}
+    <p class="hint">${escapeHtml(hint)}</p>
+    <form class="catalog-form" onsubmit="return addErrorEntry(event)">
+      <label>CTVM <input name="serviceAccountId" placeholder="CTVM36246554" required></label>
+      <label>Τύπος σφάλματος
+        <select name="errorKind">
+          ${ERROR_KINDS.map(([code, label]) => `<option value="${code}">${escapeHtml(label)}</option>`).join("")}
+        </select>
+      </label>
+      <label>Ημερομηνία <input name="occurredOn" type="date" value="${todayInput()}" required></label>
+      <button type="submit">Καταχώρηση</button>
+    </form>
+    <p id="error-entry-status" class="hint"></p>
+    ${result.error ? "" : (rows.length ? (errorView === "kind" ? renderErrorsByKind(rows) : renderErrorsByDevice(rows)) : `<p class="hint">Καμία καταχώρηση ακόμη μέσα στο ${scopePlace()}.</p>`)}
   `;
+}
+
+async function addErrorEntry(event) {
+  event.preventDefault();
+  const data = new FormData(event.target);
+  const id = String(data.get("serviceAccountId") || "").trim().toUpperCase();
+  const errorKind = String(data.get("errorKind") || "");
+  const occurredOn = String(data.get("occurredOn") || "");
+  const status = document.querySelector("#error-entry-status");
+  if (!/^CTVM\d{8}$/.test(id)) {
+    if (status) {
+      status.textContent = "Το CTVM πρέπει να είναι CTVM και 8 ψηφία.";
+    }
+    return false;
+  }
+  const result = await deskFetch("/api/desk/errors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(deskScopeBody({ serviceAccountId: id, errorKind, occurredOn }))
+  });
+  if (result.error) {
+    if (status) {
+      status.textContent = result.error;
+    }
+    return false;
+  }
+  renderErrorReports();
+  return false;
+}
+
+function renderErrorsByDevice(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const id = row.serviceAccountId || "—";
+    const group = groups.get(id) || [];
+    group.push(row);
+    groups.set(id, group);
+  });
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, entries]) => `
+    <details open>
+      <summary class="mono">${escapeHtml(id)} · ${escapeHtml(registrationsLabel(entries.length))}</summary>
+      <div class="table-wrap desk-table">
+        <table>
+          <thead><tr><th>Ημερομηνία</th><th>Τύπος σφάλματος</th></tr></thead>
+          <tbody>
+            ${entries.map((entry) => `
+              <tr>
+                <td>${escapeHtml(formatFileDay(entry.occurredOn))}</td>
+                <td>${escapeHtml(errorKindLabel(entry.errorKind))}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  `).join("");
+}
+
+function renderErrorsByKind(rows) {
+  return ERROR_KINDS.map(([code, label]) => {
+    const entries = rows.filter((row) => row.errorKind === code);
+    if (!entries.length) {
+      return "";
+    }
+    return `
+      <details open>
+        <summary>${escapeHtml(label)} · ${escapeHtml(registrationsLabel(entries.length))}</summary>
+        <div class="table-wrap desk-table">
+          <table>
+            <thead><tr><th>CTVM</th><th>Ημερομηνία</th></tr></thead>
+            <tbody>
+              ${entries.map((entry) => `
+                <tr>
+                  <td class="mono">${escapeHtml(entry.serviceAccountId || "")}</td>
+                  <td>${escapeHtml(formatFileDay(entry.occurredOn))}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </details>`;
+  }).join("");
 }
 
 function renderFindings(findings) {
@@ -427,21 +1131,38 @@ function verdictClass(value) {
 }
 
 async function renderCtvmIps() {
-  const mappings = await fetchJson("/api/devices");
+  if (!deskAtContent()) {
+    dbBody.innerHTML = `<h2>CTVM IPs</h2>${renderDeskFolders()}`;
+    return;
+  }
+  const result = await deskFetch(`/api/desk/ips?${deskQuery()}`);
+  const mappings = Array.isArray(result.payload) ? result.payload : [];
   dbBody.innerHTML = `
     <h2>CTVM IPs</h2>
-    <p class="hint">Η βάση ενώνει τα δύο JSON με τις χειροκίνητες εγγραφές. Αν λείπει IP, CTVM ή όχημα από το αρχείο, πέρασέ το εδώ.</p>
+    ${renderDeskFolders()}
+    <p class="hint">${result.error || `Κάθε συσκευή του ${scopePlace()} με τη δική της IP. Η χειροκίνητη γραμμή γράφεται και στη ροή της διερεύνησης.`}</p>
     <form id="manual-ip-form" class="catalog-form" onsubmit="return saveManualCatalog(event)">
       <label>CTVM / ServiceAccountID <input name="serviceAccountId" placeholder="CTVM46240918" autocomplete="off" required></label>
       <label>IP <input name="ipAddress" placeholder="10.249.19.21" autocomplete="off" required></label>
-      <label>Όχημα <input name="busNo" placeholder="π.χ. 2216" autocomplete="off"></label>
+      ${deskOperator === "OASA"
+        ? `<label>Τερματικό <input name="terminalCode" placeholder="αριθμός" autocomplete="off"></label>
+           <label>Σταθμός <input name="stationName" placeholder="όνομα σταθμού" autocomplete="off"></label>`
+        : `<label>Όχημα <input name="busNo" placeholder="π.χ. 2216" autocomplete="off"></label>`}
       <button type="submit">Αποθήκευση χειροκίνητα</button>
     </form>
     <p id="manual-ip-status" class="hint"></p>
-    <p class="hint">${mappings.length ? `${mappings.length} αντιστοιχίες (JSON + χειροκίνητα).` : "Άδειος κατάλογος — βάλε τα JSON στο data/ ή πέρασε μία γραμμή παραπάνω."}</p>
+    <p class="hint">${mappings.length ? `${mappings.length} συσκευές μέσα στο ${scopePlace()}.` : `Καμία συσκευή ακόμη μέσα στο ${scopePlace()}.`}</p>
     ${renderTable(
-      ["CTVM", "IP", "Όχημα", "Τύπος", "Πηγή", "Updated"],
-      mappings.map((item) => [
+      deskOperator === "OASA" ? ["CTVM", "IP", "Τερματικό", "Σταθμός", "Τύπος", "Πηγή", "Updated"] : ["CTVM", "IP", "Όχημα", "Τύπος", "Πηγή", "Updated"],
+      mappings.map((item) => deskOperator === "OASA" ? [
+        item.serviceAccountId,
+        item.ipAddress,
+        item.terminalCode || "",
+        item.stationName || "",
+        item.mobility,
+        item.source,
+        formatDate(item.updatedAt)
+      ] : [
         item.serviceAccountId,
         item.ipAddress,
         item.busNo || "",
@@ -460,13 +1181,27 @@ async function saveManualCatalog(event) {
   const payload = {
     serviceAccountId: String(data.get("serviceAccountId") || "").trim(),
     ipAddress: String(data.get("ipAddress") || "").trim(),
-    busNo: String(data.get("busNo") || "").trim()
+    busNo: String(data.get("busNo") || "").trim(),
+    terminalCode: String(data.get("terminalCode") || "").trim(),
+    stationName: String(data.get("stationName") || "").trim()
   };
   const status = document.querySelector("#manual-ip-status");
   const response = await fetch("/api/devices/ip", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
+  });
+  await deskFetch("/api/desk/ips", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(deskScopeBody({
+      serviceAccountId: payload.serviceAccountId,
+      ipAddress: payload.ipAddress,
+      busNo: payload.busNo,
+      terminalCode: payload.terminalCode,
+      stationName: payload.stationName,
+      source: "manual"
+    }))
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -494,69 +1229,139 @@ async function saveManualCatalog(event) {
 }
 
 async function renderExcelArchive() {
-  const batches = await fetchJson("/api/imports");
-  const dated = (Array.isArray(batches) ? batches : []).map((batch) => ({
-    ...batch,
-    day: formatFileDay(batch.fileDate)
-  }));
-  const days = [...new Set(dated.map((batch) => batch.day))];
-
-  if (!generalDay || !days.includes(generalDay)) {
-    generalDay = null;
-    generalBatchId = null;
-    dbBody.innerHTML = `
-      <h2>General</h2>
-      <p class="hint">${days.length ? "Διάλεξε ημέρα." : "Δεν υπάρχει ακόμα αρχείο. Χρειάζεται σύνδεση MySQL και ένα Excel."}</p>
-      <div class="categories">
-        ${days.map((day) => `
-          <button type="button" class="result-card" data-general-day="${escapeHtml(day)}">
-            <div class="result-code word">${escapeHtml(day)}</div>
-          </button>
-        `).join("")}
-      </div>
-    `;
+  if (!deskAtContent()) {
+    dbBody.innerHTML = `<h2>General</h2>${renderDeskFolders()}`;
     return;
   }
-
-  const files = dated.filter((batch) => batch.day === generalDay);
-  if (!generalBatchId || !files.some((batch) => batch.batchId === generalBatchId)) {
-    generalBatchId = null;
-    dbBody.innerHTML = `
-      <h2>${escapeHtml(generalDay)}</h2>
-      <div class="actions"><button type="button" data-general-back="days">Πίσω στις ημέρες</button></div>
-      <div class="categories">
-        ${files.map((file) => `
-          <button type="button" class="result-card" data-general-batch="${escapeHtml(file.batchId)}">
-            <strong>${escapeHtml(file.title)}</strong>
-            <p class="result-meta">YES ${file.yesCount} · NO ${file.noCount} · εκκρεμεί ${file.pendingCount}</p>
-          </button>
-        `).join("")}
-      </div>
-    `;
-    return;
-  }
-
-  const file = files.find((batch) => batch.batchId === generalBatchId);
-  const rows = await fetchJson(`/api/imports/${generalBatchId}/rows`);
+  const casesResult = generalMode === "exceptions" ? await deskFetch(`/api/desk/cases?${deskQuery()}`) : { payload: [], error: null };
+  const cases = Array.isArray(casesResult.payload) ? casesResult.payload : [];
+  const linesResult = generalMode === "devices" ? await deskFetch(`/api/desk/lines?${deskQuery()}`) : { payload: [], error: null };
+  const lines = Array.isArray(linesResult.payload) ? linesResult.payload : [];
+  const legacy = deskOperator === "OSETH" && generalMode === "exceptions" ? await fetchJson("/api/imports") : [];
   dbBody.innerHTML = `
-    <h2>${escapeHtml(file.title)}</h2>
-    <p class="hint">${escapeHtml(file.fileName)}. Οι εξαιρέσεις δεν μπαίνουν εδώ.</p>
-    <div class="actions">
-      <button type="button" data-general-back="files">Πίσω στα αρχεία</button>
-      ${file.pendingCount ? `<button type="button" class="primary" data-resume-batch="${escapeHtml(file.batchId)}">Συνέχεια εκκρεμών</button>` : ""}
-    </div>
+    <h2>General</h2>
+    ${renderDeskFolders()}
+    <p class="hint">${casesResult.error || linesResult.error || (generalMode === "exceptions"
+      ? "Τα Excel που τάισαν αυτές τις συσκευές. Η ημερομηνία αλλάζει αν διαβάστηκε λάθος. Το 02 και το 03 μετριούνται χωριστά. YES είναι επιστροφή, NO είναι μη επιστροφή."
+      : "Κάθε CTVM μένει χωριστά, με το δικό του ιστορικό, είτε ήρθε από Excel είτε καταχωρήθηκε μόνη της.")}</p>
+    ${generalMode === "exceptions" ? renderDeskFiles(cases) : renderDeskDevices(lines)}
+    ${deskOperator === "OSETH" && generalMode === "exceptions" ? renderLegacyFiles(legacy) : ""}
+  `;
+}
+
+function renderDeskFiles(cases) {
+  if (!cases.length) {
+    return `<p class="hint">Δεν έχει γίνει ακόμη drop μέσα στο ${scopePlace()}.</p>`;
+  }
+  return `
+    <div class="table-wrap desk-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Ημερομηνία</th><th>Αρχείο / συσκευή</th><th>02</th><th>03</th><th>Τύπος σφάλματος</th><th>YES</th><th>NO</th><th>Logs</th><th>Κατάσταση</th><th>Συμπέρασμα</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cases.map((item) => `
+            <tr>
+              <td><input type="date" data-case-date="${item.id}" value="${item.fileDate ? String(item.fileDate).slice(0, 10) : ""}"></td>
+              <td>${escapeHtml(item.origin === "device" ? (item.serviceAccountId || "Συσκευή") : (item.fileName || ""))}</td>
+              <td>${item.code02Count}</td>
+              <td>${item.code03Count}</td>
+              <td><input data-case-fault="${item.id}" value="${escapeHtml(item.faultType || "")}"></td>
+              <td>${item.yesCount}</td>
+              <td>${item.noCount}</td>
+              <td>${item.logsDownloaded ? "ναι" : "όχι"}</td>
+              <td>${escapeHtml(statusText(item.investigationStatus))}</td>
+              <td>
+                <select data-case-conclusion="${item.id}">
+                  <option value="" ${item.conclusion ? "" : "selected"}>—</option>
+                  <option value="YES" ${item.conclusion === "YES" ? "selected" : ""}>YES επιστροφή</option>
+                  <option value="NO" ${item.conclusion === "NO" ? "selected" : ""}>NO όχι</option>
+                </select>
+              </td>
+              <td><button type="button" data-desk-resume="${item.id}">Άνοιγμα</button></td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderDeskDevices(lines) {
+  const groups = new Map();
+  lines.forEach((line) => {
+    const id = line.serviceAccountId || "—";
+    const group = groups.get(id) || [];
+    group.push(line);
+    groups.set(id, group);
+  });
+  if (!groups.size) {
+    return `<p class="hint">Καμία συσκευή ακόμη μέσα στο ${scopePlace()}.</p>`;
+  }
+  return [...groups.entries()].map(([id, history]) => `
+    <details open>
+      <summary class="mono">${escapeHtml(id)}${deskOperator === "OASA" ? ` · ${escapeHtml(history.find((line) => line.stationName)?.stationName || "χωρίς σταθμό")}${history.find((line) => line.terminalCode) ? ` · τερματικό ${escapeHtml(history.find((line) => line.terminalCode).terminalCode)}` : ""}` : ""} · ${escapeHtml(history[0].faultType || "χωρίς τύπο σφάλματος")}</summary>
+      <div class="table-wrap desk-table">
+        <table>
+          <thead><tr><th>Ημερομηνία</th>${deskOperator === "OASA" ? "<th>Τερματικό</th><th>Σταθμός</th>" : ""}<th>Προέλευση</th><th>Κωδικός</th><th>Τύπος</th><th>Logs</th><th>Κατάσταση</th><th>Συμπέρασμα</th><th></th></tr></thead>
+          <tbody>
+            ${history.map((line) => `
+              <tr>
+                <td>${escapeHtml(line.fileDate ? formatFileDay(line.fileDate) : "")}</td>
+                ${deskOperator === "OASA" ? `<td>${escapeHtml(line.terminalCode || "")}</td><td>${escapeHtml(line.stationName || "")}</td>` : ""}
+                <td>${escapeHtml(line.origin === "device" ? "συσκευή" : (line.fileName || "excel"))}</td>
+                <td>${escapeHtml(line.resultCode || "")}</td>
+                <td><input data-line-fault="${line.id}" value="${escapeHtml(line.faultType || "")}"></td>
+                <td><input type="checkbox" data-line-logs="${line.id}" ${line.logsDownloaded ? "checked" : ""}></td>
+                <td>${escapeHtml(statusText(line.investigationStatus))}</td>
+                <td>
+                  <select data-line-conclusion="${line.id}">
+                    <option value="" ${line.conclusion ? "" : "selected"}>—</option>
+                    <option value="YES" ${line.conclusion === "YES" ? "selected" : ""}>YES</option>
+                    <option value="NO" ${line.conclusion === "NO" ? "selected" : ""}>NO</option>
+                  </select>
+                </td>
+                <td><button type="button" data-desk-resume="${line.caseId}">Άνοιγμα</button></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  `).join("");
+}
+
+function renderLegacyFiles(batches) {
+  const dated = (Array.isArray(batches) ? batches : []).map((batch) => ({ ...batch, day: formatFileDay(batch.fileDate) }));
+  if (!dated.length) {
+    return "";
+  }
+  return `
+    <h3 class="screen-next">Παλιότερα Excel OSETH</h3>
+    <p class="hint">Αρχεία που είχαν ήδη γραφτεί πριν τα χωριστά ράφια. Ανοίγουν από εκεί που έμειναν.</p>
     ${renderTable(
-      ["ServiceAccountID", "Τύπος", "Amount", "TransactionID", "Ημερομηνία", "Κατάσταση"],
-      (Array.isArray(rows) ? rows : []).map((row) => [
-        row.serviceAccountId || "",
-        row.eticketTransactionResult || "",
-        row.amount ?? "",
-        row.transactionId || "",
-        formatDate(row.transactionDate),
-        statusLabel(row.decision)
+      ["Ημέρα", "Αρχείο", "YES", "NO", "Εκκρεμεί", ""],
+      dated.map((file) => [
+        file.day,
+        file.title || file.fileName,
+        file.yesCount,
+        file.noCount,
+        file.pendingCount,
+        ""
       ])
     )}
-  `;
+    <div class="categories">
+      ${dated.map((file) => `
+        <button type="button" class="result-card" data-resume-batch="${escapeHtml(file.batchId)}">
+          <strong>${escapeHtml(file.title || file.fileName)}</strong>
+          <p class="result-meta">${escapeHtml(formatFileDay(file.fileDate))} · εκκρεμεί ${file.pendingCount}</p>
+        </button>`).join("")}
+    </div>`;
+}
+
+function statusText(value) {
+  if (value === "logs") return "έχουν κατέβει logs";
+  if (value === "concluded") return "συμπέρασμα";
+  return "ανοιχτή";
 }
 
 function formatFileDay(value) {
@@ -628,9 +1433,10 @@ async function fetchJson(url) {
 }
 
 function renderIps() {
+  const intro = ipIntro();
   ipBody.innerHTML = `
-    <h2>Συσκευές τύπου 02</h2>
-    <p class="hint">IP και όχημα από Ips_TVM360.json / Ips_Mobile.json. Αν λείπει κάτι, γράψε το — πηγαίνει στη βάση CTVM IPs ως χειροκίνητο.</p>
+    <h2>${intro.title}</h2>
+    <p class="hint">${intro.hint}</p>
     <div class="device-list" id="ip-devices">
       ${renderDeviceRows()}
     </div>
@@ -645,17 +1451,42 @@ function renderIps() {
   resolveIpsFromFiles();
 }
 
+function ipIntro() {
+  if (isOasaFlow()) {
+    return {
+      title: "Συσκευές ΟΑΣΑ",
+      hint: "Η IP, ο αριθμός τερματικού και ο σταθμός έρχονται από το Ips_Oasa.json ή από τη βάση. Αν λείπει η IP, γράψ’ την εδώ. Το ping και το κατέβασμα logs είναι τα ίδια με τον OSETH."
+    };
+  }
+  if (importProfile === "DEVICE") {
+    return {
+      title: "Καταχωρημένη συσκευή",
+      hint: "Η IP έρχεται από τη βάση ή από τα αρχεία. Αν λείπει, γράψ’ την εδώ. Μετά είναι ping και logs, όπως σε κάθε συσκευή."
+    };
+  }
+  return {
+    title: "Συσκευές τύπου 02",
+    hint: "IP και όχημα από Ips_TVM360.json / Ips_Mobile.json. Αν λείπει κάτι, γράψε το — πηγαίνει στη βάση CTVM IPs ως χειροκίνητο."
+  };
+}
+
 function renderDeviceRows() {
+  const oasa = isOasaFlow();
   return `
-    <div class="device-row ip-row" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
-      <span>CTVM</span><span>Τύπος</span><span>IP</span><span>Όχημα</span><span>Ping</span>
+    <div class="device-row ip-row${oasa ? " oasa-row" : ""}" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
+      <span>CTVM</span><span>Τύπος</span><span>IP</span>${oasa ? "<span>Τερματικό</span><span>Σταθμός</span>" : "<span>Όχημα</span>"}<span>Ping</span>
     </div>
     ${devices.map((device) => `
-      <div class="device-row ip-row">
+      <div class="device-row ip-row${oasa ? " oasa-row" : ""}">
         <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
         <span>${mobilityLabel(device.mobility)}</span>
         <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="π.χ. 10.249.19.21" onchange="saveDeviceMapping(this)">
-        <input class="ip-edit bus-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.busNo || "")}" placeholder="π.χ. 2216" onchange="saveDeviceMapping(this)">
+        ${oasa ? `
+          <input class="ip-edit terminal-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.terminal || "")}" placeholder="αριθμός τερματικού" onchange="saveDeviceMapping(this)">
+          <input class="ip-edit station-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.station || "")}" placeholder="όνομα σταθμού" onchange="saveDeviceMapping(this)">
+        ` : `
+          <input class="ip-edit bus-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.busNo || "")}" placeholder="π.χ. 2216" onchange="saveDeviceMapping(this)">
+        `}
         <span class="${device.pingReachable === true ? "verdict-ok" : device.pingReachable === false ? "verdict-bad" : ""}">${escapeHtml(device.pingLabel || "")}</span>
       </div>
     `).join("")}
@@ -689,8 +1520,13 @@ async function resolveIpsFromFiles() {
     if (!device) {
       continue;
     }
+    if (device.ip && (device.ipSource === "Ips_Oasa" || device.ipSource === "manual")) {
+      continue;
+    }
     device.ip = hit.ipAddress;
     device.busNo = hit.busNo || device.busNo;
+    device.terminal = hit.terminal || device.terminal;
+    device.station = hit.station || device.station;
     device.ipSource = hit.source;
     device.pingReachable = null;
     device.pingLabel = "";
@@ -793,8 +1629,8 @@ function renderDownload() {
   const other = readyDevices.filter((device) => device.mobility !== "Fixed" && device.mobility !== "Mobile");
 
   dlBody.innerHTML = `
-    <h2>Logs για τον τύπο 02 που μένει</h2>
-    <p class="hint">Θα κατέβουν ${readyDevices.length} συσκευές με επιτυχές ping${skippedDevices.length ? `. ${skippedDevices.length} με αποτυχία ping δεν κατεβαίνουν` : ""}. Σταθερά: το nlog. Κινητά: ssh, cd /opt/amco/middleware/TVMserver, sudo zip, κατέβασμα του zip, sudo rm. Φάκελος: Desktop\\Amco files\\κωδικός συσκευής.</p>
+    <h2>Logs</h2>
+    <p class="hint">Θα κατέβουν ${readyDevices.length} συσκευές με επιτυχές ping${skippedDevices.length ? `. ${skippedDevices.length} με αποτυχία ping δεν κατεβαίνουν` : ""}. Middleware: το nlog. Κινητό: κατεβαίνει το zip και γίνεται extract. Άλλο service: journalctl στο home και κατέβασμα από εκεί. Φάκελος: Desktop\\Amco files\\logs\\OSETH.</p>
     <div class="split">
       <div>
         <h3>Σταθερά</h3>
@@ -808,7 +1644,7 @@ function renderDownload() {
     ${other.length ? `<p class="hint">Άγνωστος τύπος: ${other.map((device) => device.serviceAccountId).join(", ")}</p>` : ""}
     ${skippedDevices.length ? `<h3>Δεν κατεβαίνουν</h3><p class="hint">Αποτυχία ping. Μπορείς να αφήσεις το αρχείο χειροκίνητα.</p>${deviceMiniList(skippedDevices)}` : ""}
     <h3 class="screen-next">Συναλλαγές στο log</h3>
-    <p class="hint">Κλικ σε μια συναλλαγή. Ανοίγει από το Selecting product μέχρι το επόμενο, με το Transaction ID και την ώρα του Excel.</p>
+    <p class="hint">Κλικ σε μια συναλλαγή. Στο middleware κρατιούνται οι γραμμές ανάμεσα στο Selecting product πάνω από την ώρα και στο επόμενο. OSETH: η ώρα είναι τα ψηφία 6–9 του Transaction ID. ΟΑΣΑ: η ώρα της ημερομηνίας συναλλαγής. Άλλο service: ολόκληρο το αρχείο.</p>
     <div id="log-cases">${renderLogCases()}</div>
     <section id="log-slice" class="log-slice" hidden></section>
     <pre id="dl-log" class="run-log"></pre>
@@ -827,7 +1663,7 @@ function deviceMiniList(list) {
   return `<div class="device-list">${list.map((device) => `
     <div class="device-row dl-row">
       <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
-      <span>${mobilityLabel(device.mobility)}${device.mobility === "Mobile" ? " · zip" : ""} · ${(device.logDates || []).join(", ") || "χωρίς ημερομηνία"} · ${escapeHtml(pingDownloadLabel(device))}</span>
+      <span>${mobilityLabel(device.mobility)}${device.mobility === "Mobile" ? " · zip" : ""} · ${escapeHtml(serviceLabel(device.logService))} · ${(device.logDates || []).join(", ") || "χωρίς ημερομηνία"}${device.clockTime ? " · " + escapeHtml(device.clockTime) : ""} · ${escapeHtml(pingDownloadLabel(device))}</span>
       <input class="ip-edit" data-id="${escapeHtml(device.serviceAccountId)}" value="${escapeHtml(device.ip || "")}" placeholder="IP" onchange="saveDeviceMapping(this)">
       <label class="log-drop">Drop / επιλογή nlog
         <input type="file" accept=".log,.zip,.txt" data-id="${escapeHtml(device.serviceAccountId)}" onchange="uploadManualLog(this)">
@@ -844,10 +1680,22 @@ async function saveDeviceMapping(input) {
     return;
   }
   const row = input.closest(".device-row");
-  const ip = (row?.querySelector(".ip-edit:not(.bus-edit)")?.value || device.ip || "").trim();
+  const ip = (row?.querySelector(".ip-edit:not(.bus-edit):not(.terminal-edit):not(.station-edit)")?.value || device.ip || "").trim();
   const bus = (row?.querySelector(".bus-edit")?.value || device.busNo || "").trim();
+  const terminal = (row?.querySelector(".terminal-edit")?.value || device.terminal || "").trim();
+  const station = (row?.querySelector(".station-edit")?.value || device.station || "").trim();
   device.ip = ip || null;
   device.busNo = bus || null;
+  device.terminal = terminal || null;
+  device.station = station || null;
+  importedRows.forEach((row) => {
+    if (sameAccount(row.immediate?.serviceAccountId, device.serviceAccountId)) {
+      row.stationName = station || null;
+      if (terminal) {
+        row.oasaTerminal = terminal;
+      }
+    }
+  });
   device.pingReachable = null;
   device.pingLabel = "";
   refreshPingButton();
@@ -869,6 +1717,23 @@ async function saveDeviceMapping(input) {
       mobility: device.mobility
     })
   });
+  const network = importProfile === "DEVICE" ? entryNetwork : deskNetwork;
+  if (isOasaFlow() && ip && network) {
+    await deskFetch("/api/desk/ips", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator: "OASA",
+        network: network,
+        serviceAccountId: device.serviceAccountId,
+        ipAddress: ip,
+        terminalCode: terminal,
+        stationName: station,
+        mobility: device.mobility,
+        source: "manual"
+      })
+    });
+  }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     setIpLog(payload.message || "Invalid IP.");
@@ -927,7 +1792,10 @@ async function startLogDownload() {
         mobility: device.mobility,
         ipAddress: device.ip,
         pingReachable: true,
-        logDates: device.logDates || []
+        logDates: device.logDates || [],
+        logService: device.logService || "middleware",
+        clockTime: device.searchMode === "transaction" ? device.clockTime || null : null,
+        grepPattern: device.searchMode === "range" ? device.grepText || null : null
       }))
     })
   });
@@ -978,6 +1846,7 @@ function applyDownloadStatus(status) {
     device.downloadStatus = result.message || result.status;
     if (result.localPath) {
       device.localPath = result.localPath;
+      noteDeskLogs(device.serviceAccountId);
     }
   }
   document.querySelectorAll(".dl-row").forEach((row) => {
@@ -1056,10 +1925,15 @@ function renderLogCases() {
     }
     for (const row of rows) {
       const id = row.immediate.transactionId || "";
+      const clock = clockForRow(row);
+      const whole = row.searchMode === "range" || (row.logService && row.logService !== "middleware");
+      const label = row.searchMode === "range"
+        ? `${row.rangeFrom} – ${row.rangeUntil}`
+        : (whole ? serviceLabel(row.logService) : (clock || id || "χωρίς ώρα"));
       buttons.push(`
-        <button type="button" class="case-open" data-tx="${escapeHtml(id)}" data-device="${escapeHtml(device.serviceAccountId)}" onclick="openLogSlice(this)" ${id ? "" : "disabled"}>
+        <button type="button" class="case-open" data-tx="${escapeHtml(id)}" data-clock="${escapeHtml(clock || "")}" data-whole="${whole ? "1" : ""}" data-device="${escapeHtml(device.serviceAccountId)}" onclick="openLogSlice(this)" ${whole || clock || id ? "" : "disabled"}>
           <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
-          <span class="mono">${escapeHtml(id || "χωρίς ID")}</span>
+          <span class="mono">${escapeHtml(label)}</span>
           <span>${escapeHtml(formatDate(row.immediate.transactionDate))}</span>
         </button>`);
     }
@@ -1071,9 +1945,118 @@ function renderLogCases() {
   return `<div class="case-list">${buttons.join("")}</div>`;
 }
 
+function serviceLabel(service) {
+  if (!service || service === "middleware") {
+    return "middleware.service";
+  }
+  return service;
+}
+
+function clockFromOsethId(id) {
+  const digits = String(id || "").replace(/\D/g, "");
+  if (digits.length < 9) {
+    return null;
+  }
+  const hh = digits.slice(5, 7);
+  const mm = digits.slice(7, 9);
+  const hour = Number(hh);
+  const minute = Number(mm);
+  if (hour > 23 || minute > 59) {
+    return null;
+  }
+  return `${hh}:${mm}`;
+}
+
+function clockFromDate(value) {
+  const raw = String(value || "").trim();
+  const compact = raw.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
+  if (compact) {
+    return validClock(compact[4], compact[5]);
+  }
+  const marked = raw.match(/(?:T|\s)(\d{2}):(\d{2})/);
+  if (marked) {
+    return validClock(marked[1], marked[2]);
+  }
+  return null;
+}
+
+function validClock(hourText, minuteText) {
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (hour > 23 || minute > 59) {
+    return null;
+  }
+  return `${hourText}:${minuteText}`;
+}
+
+function clockForRow(row) {
+  if (row.clockTime) {
+    return row.clockTime;
+  }
+  if (row.logService && row.logService !== "middleware") {
+    return null;
+  }
+  if (importProfile === "OASA") {
+    return clockFromDate(row.immediate?.transactionDate);
+  }
+  if (importProfile === "DEVICE") {
+    return null;
+  }
+  return clockFromOsethId(row.immediate?.transactionId);
+}
+
+function daysBetween(from, until) {
+  const days = [];
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${until}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+    return days;
+  }
+  for (let cursor = new Date(start); cursor <= end && days.length < 32; cursor.setDate(cursor.getDate() + 1)) {
+    const month = String(cursor.getMonth() + 1).padStart(2, "0");
+    const day = String(cursor.getDate()).padStart(2, "0");
+    days.push(`${cursor.getFullYear()}-${month}-${day}`);
+  }
+  return days;
+}
+
+function flowProfile(row) {
+  if (row?.operator === "OASA" || row?.operator === "OSETH") {
+    return row.operator;
+  }
+  if (importProfile === "OASA" || importProfile === "OSETH") {
+    return importProfile;
+  }
+  if (entryOperator === "OASA" || entryOperator === "OSETH") {
+    return entryOperator;
+  }
+  if (deskOperator === "OASA" || deskOperator === "OSETH") {
+    return deskOperator;
+  }
+  return "OSETH";
+}
+
+function renderFlow(flow) {
+  if (!flow) {
+    return "";
+  }
+  const missing = (flow.deviations || []).map((item) =>
+    `<li>Βήμα ${escapeHtml(item.stepNumber)}: ${escapeHtml(item.expected || "")}</li>`).join("");
+  return `
+    <section class="flow-reading">
+      <h3>Αρχέτυπο flow</h3>
+      <p class="hint">${escapeHtml(flow.flowMessage || "")}</p>
+      ${missing ? `<ul>${missing}</ul>` : ""}
+      <h3>Ερμηνεία</h3>
+      <p class="${flow.errorKind ? "slice-miss" : "hint"}">${escapeHtml(flow.errorMessage || "")}</p>
+    </section>`;
+}
+
 async function openLogSlice(button) {
   const transactionId = button.dataset.tx || "";
   const serviceAccountId = button.dataset.device || "";
+  const clockTime = button.dataset.clock || "";
+  const wholeFile = button.dataset.whole === "1";
   const panel = document.querySelector("#step-download:not([hidden]) #log-slice, #step-process:not([hidden]) #log-slice");
   if (!panel) {
     return;
@@ -1083,26 +2066,30 @@ async function openLogSlice(button) {
   const device = devices.find((item) => sameAccount(item.serviceAccountId, serviceAccountId) && item.localPath);
   const row = needsIpRows().find((item) =>
     sameAccount(item.immediate.serviceAccountId, serviceAccountId)
-    && String(item.immediate.transactionId || "") === transactionId);
+    && (wholeFile || String(item.immediate.transactionId || "") === transactionId));
   panel.hidden = false;
   if (!device) {
     panel.innerHTML = `<p class="slice-miss">Δεν υπάρχει log για αυτή τη συσκευή.</p>`;
     return;
   }
-  panel.innerHTML = `<p class="hint">Άνοιγμα ${escapeHtml(transactionId)}…</p>`;
+  const title = wholeFile ? serviceLabel(row?.logService) : (clockTime || transactionId);
+  panel.innerHTML = `<p class="hint">Άνοιγμα ${escapeHtml(title)}…</p>`;
   const response = await fetch("/api/logs/slice", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       path: device.localPath,
       transactionId,
-      transactionDate: row?.immediate.transactionDate || null
+      transactionDate: row?.immediate.transactionDate || null,
+      clockTime: clockTime || null,
+      profile: flowProfile(row),
+      wholeFile
     })
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.found) {
     panel.innerHTML = `
-      <h3 class="mono">${escapeHtml(transactionId)}</h3>
+      <h3 class="mono">${escapeHtml(title)}</h3>
       <p class="slice-miss">${escapeHtml(payload.message || "Δε βρέθηκε η συναλλαγή.")}</p>`;
     return;
   }
@@ -1112,8 +2099,10 @@ async function openLogSlice(button) {
       <span class="slice-text">${escapeHtml(line.text || "")}</span>
     </div>`).join("");
   panel.innerHTML = `
-    <h3 class="mono">${escapeHtml(transactionId)}</h3>
+    <h3 class="mono">${escapeHtml(title)}</h3>
     <p class="hint">${escapeHtml(payload.logFileName || "")} · γραμμές ${escapeHtml(payload.lineStart)}–${escapeHtml(payload.lineEnd)}. ${escapeHtml(payload.message || "")}</p>
+    ${payload.savedPath ? `<p class="hint">Η συναλλαγή αποθηκεύτηκε στο ${escapeHtml(payload.savedPath)}. Τα nlog μένουν στον ίδιο φάκελο.</p>` : ""}
+    ${renderFlow(payload.flow)}
     <div class="slice-view">${lines}</div>`;
   panel.scrollIntoView({ block: "nearest" });
 }
@@ -1147,7 +2136,7 @@ function renderProcess() {
       </section>
     </div>
     ${pending.length ? `
-      <h2 class="screen-next">Τύπος 02 που πέρασε από IP</h2>
+      <h2 class="screen-next">${importProfile === "OSETH" ? "Τύπος 02 που πέρασε από IP" : "Γραμμές που πέρασαν από IP"}</h2>
       <p class="hint">${countLabel(pending.length, "συναλλαγή", "συναλλαγές")} · ${countLabel(logs.length, "log", "logs")}. Αυτές δεν είναι ακόμα YES ή NO. Η επεξεργασία ψάχνει μόνο αυτά τα Transaction ID, μόνο κάρτα.</p>
       ${renderTable(
         ["ServiceAccountID", "TransactionID", "RRN", "Amount", "Ημερομηνία", "Τύπος"],
@@ -1161,6 +2150,7 @@ function renderProcess() {
         ])
       )}
       <h3 class="screen-next">Άνοιγμα συναλλαγής στο log</h3>
+      <p class="hint">Σε μία συναλλαγή το κομμάτι συγκρίνεται με το αρχέτυπο του φορέα της. Ο OSETH και ο ΟΑΣΑ έχουν χωριστό flow και χωριστά σφάλματα.</p>
       <div id="log-cases">${renderLogCases()}</div>
       <section id="log-slice" class="log-slice" hidden></section>
       <p class="hint" style="margin-top:16px;">Logs: ${logs.map((device) => device.serviceAccountId + " → " + (device.downloadStatus || device.localPath)).join(" · ") || "κανένα"}</p>
@@ -1259,8 +2249,39 @@ function refreshDevices() {
             downloadStatus: prior?.downloadStatus || null,
             pingReachable: prior?.pingReachable ?? null,
             pingLabel: prior?.pingLabel || "",
+            ipSource: prior?.ipSource || null,
             logDates: []
         };
+
+        if (row.stationName) {
+            current.station = row.stationName;
+        }
+        if (row.oasaTerminal) {
+            current.terminal = row.oasaTerminal;
+        }
+        if (row.logService) {
+            current.logService = row.logService;
+        }
+        if (row.clockTime) {
+            current.clockTime = row.clockTime;
+        }
+        if (row.searchMode) {
+            current.searchMode = row.searchMode;
+        }
+        if (row.grepText) {
+            current.grepText = row.grepText;
+        }
+        if (row.rangeFrom && row.rangeUntil) {
+            for (const day of daysBetween(row.rangeFrom, row.rangeUntil)) {
+                if (!current.logDates.includes(day)) {
+                    current.logDates.push(day);
+                }
+            }
+        }
+        if (row.resolvedIp) {
+            current.ip = row.resolvedIp;
+            current.ipSource = importProfile === "DEVICE" ? "manual" : "Ips_Oasa";
+        }
 
         current.transactions++;
 

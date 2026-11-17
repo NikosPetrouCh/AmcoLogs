@@ -12,6 +12,7 @@ public sealed class LogsController : ControllerBase
     private readonly ILogDownloadJob _job;
     private readonly SshConnectionProbe _ping;
     private readonly NlogSliceReader _slices;
+    private readonly ITransactionFlowReader _flow;
     private readonly DeviceAccessSettings _access;
     private readonly INlogSaleLocator _locator;
     private readonly SaleInvestigation _investigation;
@@ -21,6 +22,7 @@ public sealed class LogsController : ControllerBase
         ILogDownloadJob job,
         SshConnectionProbe ping,
         NlogSliceReader slices,
+        ITransactionFlowReader flow,
         DeviceAccessSettings access,
         INlogSaleLocator locator,
         SaleInvestigation investigation,
@@ -29,6 +31,7 @@ public sealed class LogsController : ControllerBase
         _job = job;
         _ping = ping;
         _slices = slices;
+        _flow = flow;
         _access = access;
         _locator = locator;
         _investigation = investigation;
@@ -135,9 +138,9 @@ public sealed class LogsController : ControllerBase
     [HttpPost("slice")]
     public ActionResult<LogSliceResult> Slice([FromBody] LogSliceRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Path) || string.IsNullOrWhiteSpace(request.TransactionId))
+        if (string.IsNullOrWhiteSpace(request.Path))
         {
-            return BadRequest(new { message = "Χρειάζεται log και Transaction ID." });
+            return BadRequest(new { message = "Χρειάζεται το log." });
         }
 
         if (!IsAllowedLogPath(request.Path))
@@ -145,7 +148,35 @@ public sealed class LogsController : ControllerBase
             return BadRequest(new { message = "Το log δεν είναι σε επιτρεπόμενο φάκελο." });
         }
 
-        return Ok(_slices.Read(request.Path, request.TransactionId, request.TransactionDate));
+        if (request.WholeFile)
+        {
+            return Ok(_slices.ReadWhole(request.Path));
+        }
+
+        var clockText = request.ClockTime;
+        if (string.IsNullOrWhiteSpace(clockText)
+            && string.Equals(request.Profile, "OSETH", StringComparison.OrdinalIgnoreCase))
+        {
+            clockText = TransactionClock.FromOsethTransactionId(request.TransactionId);
+        }
+
+        if (string.IsNullOrWhiteSpace(clockText)
+            && string.Equals(request.Profile, "OASA", StringComparison.OrdinalIgnoreCase))
+        {
+            clockText = TransactionClock.FromTimestamp(request.TransactionDate);
+        }
+
+        if (TransactionClock.TryParse(clockText, out var clock))
+        {
+            return Ok(WithFlow(_slices.ReadByClock(request.Path, clock, request.TransactionDate), request.Profile, request.Path, clockText));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TransactionId))
+        {
+            return BadRequest(new { message = "Χρειάζεται ώρα συναλλαγής ή Transaction ID." });
+        }
+
+        return Ok(WithFlow(_slices.Read(request.Path, request.TransactionId, request.TransactionDate), request.Profile, request.Path, clockText));
     }
 
     [HttpPost("inspect")]
@@ -253,6 +284,58 @@ public sealed class LogsController : ControllerBase
         return NlogFile.OpenRead(temp);
     }
 
+    private LogSliceResult WithFlow(LogSliceResult slice, string? profile, string sourcePath, string? clockText)
+    {
+        if (!slice.Found)
+        {
+            return slice;
+        }
+
+        return new LogSliceResult
+        {
+            Found = slice.Found,
+            Message = slice.Message,
+            LogFileName = slice.LogFileName,
+            LineStart = slice.LineStart,
+            LineEnd = slice.LineEnd,
+            Lines = slice.Lines,
+            Flow = _flow.Read(slice.Lines.Select(line => line.Text).ToArray(), profile),
+            SavedPath = SaveOpenedSlice(sourcePath, slice, clockText)
+        };
+    }
+
+    private static string? SaveOpenedSlice(string sourcePath, LogSliceResult slice, string? clockText)
+    {
+        if (slice.Lines.Count == 0)
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(sourcePath);
+        if (fileName.StartsWith("nlog-slice-", StringComparison.OrdinalIgnoreCase))
+        {
+            return sourcePath;
+        }
+
+        var dir = Directory.Exists(sourcePath) ? sourcePath : Path.GetDirectoryName(sourcePath);
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            return null;
+        }
+
+        var first = slice.Lines[0].Text ?? "";
+        var day = first.Length >= 10
+            && DateOnly.TryParseExact(first[..10], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)
+            ? first[..10]
+            : "day";
+        var hhmm = TransactionClock.TryParse(clockText, out var clock)
+            ? clock.ToString("HHmm", System.Globalization.CultureInfo.InvariantCulture)
+            : "time";
+        var path = Path.Combine(dir, $"nlog-slice-{day}-{hhmm}.log");
+        System.IO.File.WriteAllLines(path, slice.Lines.Select(line => line.Text));
+        return path;
+    }
+
     private bool IsAllowedLogPath(string path)
     {
         var full = Path.GetFullPath(path);
@@ -307,6 +390,9 @@ public sealed class LogSliceRequest
     public string? Path { get; set; }
     public string? TransactionId { get; set; }
     public DateTime? TransactionDate { get; set; }
+    public string? ClockTime { get; set; }
+    public string? Profile { get; set; }
+    public bool WholeFile { get; set; }
 }
 
 public sealed class ProcessLogsRequest

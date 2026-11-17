@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/app.css?v=18">
+  <link rel="stylesheet" href="/css/app.css?v=27">
 </head>
 <body>
   <div class="app">
@@ -25,8 +25,8 @@
           <button type="button" class="pipeline-btn" data-step="1">
             <span class="step">1</span>
             <div>
-              <strong>Excel</strong>
-              <small>Transaction ID · RRN · ημερομηνία</small>
+            <strong>Εισαγωγή</strong>
+            <small>Συσκευή ή αρχείο</small>
             </div>
           </button>
         </li>
@@ -61,9 +61,9 @@
 
       <nav class="db-nav">
         <p class="db-nav-title">Database</p>
+        <button type="button" class="db-link" data-db="general">General</button>
         <button type="button" class="db-link" data-db="errors">Error reports</button>
         <button type="button" class="db-link" data-db="ips">CTVM IPs</button>
-        <button type="button" class="db-link" data-db="general">General</button>
         <p id="db-dot" class="db-dot">MySQL offline</p>
       </nav>
     </aside>
@@ -72,17 +72,90 @@
       <header class="stage-head">
         <div>
           <p id="kicker" class="kicker">Βήμα 1 από 4</p>
-          <h1 id="stage-title">Εισαγωγή Excel</h1>
-          <p id="stage-lede" class="lede">Ό,τι δεν είναι CTVM και 8 ψηφία, και όλος ο τύπος 04, μένουν έξω. Στις IP περνάει μόνο ο τύπος 02 που δεν έχει ποσό 0,02. Το YES και το NO βγαίνουν στο πόρισμα.</p>
+          <h1 id="stage-title">Εισαγωγή</h1>
+          <p id="stage-lede" class="lede" hidden></p>
         </div>
       </header>
 
       <section id="step-excel">
-        <section id="dropzone" class="dropzone">
-          <input id="file-input" type="file" accept=".xlsx,.xlsm" hidden>
-          <p class="drop-title">Drop Excel εδώ</p>
-          <p class="drop-copy">ή <button type="button" id="browse">επίλεξε αρχείο</button> · .xlsx</p>
-        </section>
+        <div id="entry-choice" class="entry-choice">
+          <button type="button" class="result-card" data-entry="exceptions">
+            <strong>Daily Exceptions</strong>
+            <p class="result-meta">Excel file</p>
+          </button>
+          <button type="button" class="result-card" data-entry="device">
+            <strong>Device investigation</strong>
+            <p class="result-meta">One CTVM</p>
+          </button>
+        </div>
+        <div id="entry-work" hidden>
+          <button type="button" id="entry-back" class="desk-up">Back</button>
+          <div class="entry-grid">
+            <section id="entry-device" class="panel-block entry-card" hidden>
+              <h2>Device investigation</h2>
+              <form id="device-entry" class="catalog-form device-entry-form">
+              <label>CTVM
+                <input name="ctvm" required placeholder="CTVM36246554" autocomplete="off">
+              </label>
+              <label>Φορέας
+                <select name="operator">
+                  <option value="OSETH">OSETH</option>
+                  <option value="OASA">OASA</option>
+                </select>
+              </label>
+              <label id="device-network" hidden>Δίκτυο, μέσα στον OASA
+                <select name="network">
+                  <option value="TRAM">TRAM</option>
+                  <option value="METRO">METRO</option>
+                </select>
+              </label>
+              <label>Τύπος σφάλματος
+                <input name="faultType" placeholder="προαιρετικό" autocomplete="off">
+              </label>
+              <label>Αναζήτηση
+                <select name="searchMode" id="device-search-mode">
+                  <option value="transaction">Μία συναλλαγή</option>
+                  <option value="range">Εύρος ημερομηνιών</option>
+                </select>
+              </label>
+              <label>Service
+                <select name="logService" id="device-log-service">
+                  <option value="middleware">middleware.service</option>
+                  <option value="coinman.service">coinman.service</option>
+                  <option value="bnr.service">bnr.service</option>
+                  <option value="printman.service">printman.service</option>
+                  <option value="frontman.service">frontman.service</option>
+                </select>
+              </label>
+              <label id="device-log-date">Ημερομηνία log
+                <input name="logDate" type="date">
+              </label>
+              <label id="device-clock">Ώρα συναλλαγής
+                <input name="clockTime" placeholder="08:23" inputmode="numeric" autocomplete="off">
+              </label>
+              <label id="device-range-from" hidden>Από
+                <input name="rangeFrom" type="date">
+              </label>
+              <label id="device-range-until" hidden>Έως
+                <input name="rangeUntil" type="date">
+              </label>
+              <label id="device-grep" hidden>Log για grep
+                <input name="grepText" placeholder="το κείμενο που ψάχνεις" autocomplete="off">
+              </label>
+              <button type="submit">Καταχώρηση</button>
+            </form>
+            <p id="device-entry-error" class="status-line error" hidden></p>
+            </section>
+            <section id="entry-file" class="panel-block entry-card" hidden>
+              <h2>Daily Exceptions</h2>
+            <section id="dropzone" class="dropzone">
+              <input id="file-input" type="file" accept=".xlsx,.xlsm" hidden>
+              <p class="drop-title">Drop Excel εδώ</p>
+              <p class="drop-copy">ή <button type="button" id="browse">επίλεξε αρχείο</button> · .xlsx</p>
+            </section>
+            </section>
+          </div>
+        </div>
         <p id="status-line" class="status-line" hidden></p>
         <section id="summary" class="summary" hidden></section>
         <section id="categories" class="categories" hidden></section>
@@ -120,6 +193,6 @@
       </section>
     </main>
   </div>
-  <script src="/js/app.js?v=35"></script>
+  <script src="/js/app.js?v=47"></script>
 </body>
 </html>

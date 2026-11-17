@@ -15,4 +15,6 @@ public sealed class LogSliceResult
     public int? LineStart { get; init; }
     public int? LineEnd { get; init; }
     public IReadOnlyList<LogSliceLine> Lines { get; init; } = [];
+    public FlowReading? Flow { get; init; }
+    public string? SavedPath { get; init; }
 }

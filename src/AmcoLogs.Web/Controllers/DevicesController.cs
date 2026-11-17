@@ -99,7 +99,7 @@ public sealed class DevicesController : ControllerBase
             mapping,
             message = persisted
                 ? null
-                : "Kept for this session. Connect MySQL under Database to store it."
+                : "Έμεινε για αυτή τη συνεδρία. Σύνδεσε MySQL από το Database για να αποθηκευτεί."
         });
     }
     [HttpPost("import-json")]
@@ -141,7 +141,7 @@ public sealed class DevicesController : ControllerBase
             await _store.UpsertDeviceIpAsync(mapping, cancellationToken);
             return true;
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
             return false;
         }
