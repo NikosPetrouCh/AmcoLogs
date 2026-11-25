@@ -29,19 +29,24 @@ public static class TransactionClock
         }
 
         var digits = new string(transactionId.Where(char.IsDigit).ToArray());
-        if (digits.Length < 9)
+
+        if (digits.Length < 8)
         {
             return null;
         }
 
-        var hourText = digits.Substring(5, 2);
-        var minuteText = digits.Substring(7, 2);
-        if (!int.TryParse(hourText, NumberStyles.None, CultureInfo.InvariantCulture, out var hour) || hour > 23)
+        // OSETH: Τα ψηφία 5-8 περιέχουν HHmm.
+        var hourText = digits.Substring(4, 2);
+        var minuteText = digits.Substring(6, 2);
+
+        if (!int.TryParse(hourText, NumberStyles.None,
+            CultureInfo.InvariantCulture, out var hour) || hour > 23)
         {
             return null;
         }
 
-        if (!int.TryParse(minuteText, NumberStyles.None, CultureInfo.InvariantCulture, out var minute) || minute > 59)
+        if (!int.TryParse(minuteText, NumberStyles.None,
+            CultureInfo.InvariantCulture, out var minute) || minute > 59)
         {
             return null;
         }
@@ -49,13 +54,8 @@ public static class TransactionClock
         return $"{hour:00}:{minute:00}";
     }
 
-    public static string? FromTimestamp(DateTime? value)
+    public static string? FromTimestamp(DateTime? timestamp)
     {
-        if (value is null)
-        {
-            return null;
-        }
-
-        return value.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
+        return timestamp?.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
     }
 }

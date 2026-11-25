@@ -56,7 +56,7 @@ public sealed class MySqlDeskArchive
             await using var lineCommand = new MySqlCommand(
                 $"""
                 INSERT INTO desk_case_line_{scope} (
-                    id, case_id, row_number, service_account_id, fault_type, result_code, decision,
+                id, case_id, `row_number`, service_account_id, fault_type, result_code, decision,
                     logs_downloaded, investigation_status, conclusion, transaction_id, transaction_date, amount,
                     terminal_code, station_name)
                 VALUES (
@@ -164,7 +164,7 @@ public sealed class MySqlDeskArchive
         var scope = DeskScope.TableKey(operatorName, network);
         await using var connection = await OpenAsync(cancellationToken);
         var sql = $"""
-            SELECT l.id, l.case_id, l.row_number, l.service_account_id, l.fault_type, l.result_code, l.decision,
+            SELECT l.id, l.case_id, l.`row_number`, l.service_account_id, l.fault_type, l.result_code, l.decision,
                    l.logs_downloaded, l.investigation_status, l.conclusion, l.transaction_id, l.transaction_date, l.amount,
                    l.terminal_code, l.station_name,
                    c.file_name, c.file_date, c.origin
@@ -176,7 +176,7 @@ public sealed class MySqlDeskArchive
             sql += " WHERE l.case_id = @caseId";
         }
 
-        sql += " ORDER BY c.file_date DESC, l.row_number;";
+        sql += " ORDER BY c.file_date DESC, l.`row_number`;";
         await using var command = new MySqlCommand(sql, connection);
         if (caseId.HasValue)
         {
@@ -440,7 +440,7 @@ public sealed class MySqlDeskArchive
         var dateOrdinal = reader.GetOrdinal("file_date");
         return new DeskCaseSummary
         {
-            Id = Guid.Parse(reader.GetString("id")),
+            Id = reader.GetGuid("id"),
             Origin = reader.GetString("origin"),
             FileName = reader.IsDBNull(reader.GetOrdinal("file_name")) ? null : reader.GetString("file_name"),
             FileDate = reader.IsDBNull(dateOrdinal) ? null : DateOnly.FromDateTime(reader.GetDateTime(dateOrdinal)),

@@ -77,9 +77,12 @@ public static class TransactionScreen
             return row.WithScreen(RowDisposition.AutomaticYes, Yes, "Τύπος 03. Αυτόματο YES.");
         }
 
-        if (result == "02" && IsTwoCents(row.Immediate.Amount))
+        if (result == "02" && IsAcceptedSmallAmount(row.Immediate.Amount))
         {
-            return row.WithScreen(RowDisposition.AutomaticYes, Yes, "Τύπος 02 με ποσό 0,02. Αυτόματο YES.");
+            return row.WithScreen(
+                RowDisposition.AutomaticYes,
+                Yes,
+                "Τύπος 02 με αποδεκτό μικρό ποσό. Αυτόματο YES.");
         }
 
         if (result == "02")
@@ -90,16 +93,20 @@ public static class TransactionScreen
         return row.WithScreen(RowDisposition.Unclassified, null, "Δεν υπάρχει κανόνας YES/NO για αυτόν τον τύπο.");
     }
 
-    private static bool IsTwoCents(decimal? amount)
+    private static bool IsAcceptedSmallAmount(decimal? amount)
     {
         if (amount is null)
         {
             return false;
         }
 
-        return decimal.Round(amount.Value, 2, MidpointRounding.AwayFromZero) == 0.02m;
-    }
+        var value = amount.Value;
 
+        return value == 1m
+            || value == 2m
+            || value == 0.01m
+            || value == 0.02m;
+    }
     private static string? ResultCode(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))

@@ -41,9 +41,7 @@ public sealed class ImportsController : ControllerBase
 
         await using var stream = file.OpenReadStream();
         var parsed = _parser.Parse(stream, file.FileName);
-        var screened = parsed.Profile == ExcelImportResult.OasaProfile
-            ? parsed
-            : TransactionScreen.Apply(parsed);
+        var screened = TransactionScreen.Apply(parsed);
 
         SavedExcelImport? saved = null;
         string? persistMessage = null;

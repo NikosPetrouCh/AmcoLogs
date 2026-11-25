@@ -2,7 +2,6 @@ using AmcoLogs.Core.Device;
 using AmcoLogs.Core.Persistence;
 using AmcoLogs.Infrastructure.Device;
 using Microsoft.AspNetCore.Mvc;
-
 namespace AmcoLogs.Web.Controllers;
 
 [ApiController]
@@ -22,9 +21,41 @@ public sealed class DevicesController : ControllerBase
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<DeviceIpMapping>>> List(CancellationToken cancellationToken)
+
+
     {
         var stored = await _store.ListDeviceIpsAsync(cancellationToken);
         return Ok(IpDirectory.Union(_catalog.All(), stored.Concat(_manual.All())));
+    }
+
+    [HttpGet("investigation/{batchId:guid}")]
+    public async Task<ActionResult<IReadOnlyList<InvestigationDevice>>> ListInvestigationDevices(
+    Guid batchId,
+    CancellationToken cancellationToken)
+    {
+        var devices = await _store.ListInvestigationDevicesAsync(
+            batchId,
+            cancellationToken);
+
+        return Ok(devices);
+    }
+
+    [HttpPut("investigation/{deviceId:guid}")]
+    public async Task<IActionResult> UpdateInvestigationDevice(
+    Guid deviceId,
+    [FromBody] InvestigationDevice device,
+    CancellationToken cancellationToken)
+    {
+        if (deviceId != device.Id)
+        {
+            return BadRequest(new { message = "Device ID mismatch." });
+        }
+
+        await _store.UpdateInvestigationDeviceAsync(
+            device,
+            cancellationToken);
+
+        return Ok(new { ok = true });
     }
 
     [HttpPost("resolve")]

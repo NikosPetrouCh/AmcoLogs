@@ -46,7 +46,7 @@ public static class DeskTables
                 CREATE TABLE IF NOT EXISTS desk_case_line_{scope} (
                     id CHAR(36) NOT NULL PRIMARY KEY,
                     case_id CHAR(36) NOT NULL,
-                    row_number INT NOT NULL,
+                    `row_number` INT NOT NULL,
                     service_account_id VARCHAR(64) NULL,
                     fault_type VARCHAR(128) NULL,
                     result_code VARCHAR(8) NULL,

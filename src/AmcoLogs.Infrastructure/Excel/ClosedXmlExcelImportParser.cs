@@ -148,35 +148,23 @@ public sealed class ClosedXmlExcelImportParser : IExcelImportParser
         };
     }
 
-    private ExcelImportResult ParseOasa(IXLWorksheet worksheet, string fileName, int headerRowNumber, int lastRow, List<ColumnMap> columns)
+
+
+    private ExcelImportResult ParseOasa(
+        IXLWorksheet worksheet,
+        string fileName,
+        int headerRow,
+        int lastRow,
+        IReadOnlyList<ColumnMap> columns)
     {
         var terminal = Find(columns, OasaTerminalAliases);
         var amount = Find(columns, AmountAliases);
         var status = Find(columns, OasaStatusAliases);
-        var transactionDate = Find(columns, TransactionDateAliases);
-        var warnings = new List<string>();
-        if (amount is null)
-        {
-            warnings.Add("Δεν βρέθηκε στήλη Ποσό.");
-        }
-
-        if (transactionDate is null)
-        {
-            warnings.Add("Δεν βρέθηκε στήλη Ημερομηνία Συναλλαγής.");
-        }
-
-        if (status is null)
-        {
-            warnings.Add("Δεν βρέθηκε στήλη Κωδ. Κατάστασης.");
-        }
-
-        if (_oasa.Count == 0)
-        {
-            warnings.Add("Το Ips_Oasa.json είναι άδειο ή λείπει. Χωρίς αυτό ο κωδικός τερματικού δεν γίνεται CTVM και IP.");
-        }
+        var date = Find(columns, TransactionDateAliases);
 
         var mapped = new HashSet<ColumnMap>();
-        foreach (var column in new[] { terminal, amount, status, transactionDate })
+
+        foreach (var column in new[] { terminal, amount, status, date })
         {
             if (column is not null)
             {
@@ -184,79 +172,115 @@ public sealed class ClosedXmlExcelImportParser : IExcelImportParser
             }
         }
 
+        var extraColumns = columns
+            .Where(column => !mapped.Contains(column))
+            .ToList();
+
+        var warnings = new List<string>();
+
+        if (terminal is null)
+            warnings.Add("Δεν βρέθηκε στήλη ΟΑΣΑ κωδικός τερματικού.");
+
+        if (amount is null)
+            warnings.Add("Δεν βρέθηκε στήλη ποσού.");
+
+        if (date is null)
+            warnings.Add("Δεν βρέθηκε στήλη ημερομηνίας συναλλαγής.");
+
+        if (status is null)
+            warnings.Add("Δεν βρέθηκε στήλη κωδικού κατάστασης.");
+
+        if (_oasa.Count == 0)
+            warnings.Add("Το Ips_Oasa.json είναι κενό ή δεν βρέθηκε.");
+
         var rows = new List<ExcelImportRow>();
-        var unmatched = 0;
-        for (var rowNumber = headerRowNumber + 1; rowNumber <= lastRow; rowNumber++)
+
+        for (var rowNumber = headerRow + 1; rowNumber <= lastRow; rowNumber++)
         {
             var worksheetRow = worksheet.Row(rowNumber);
-            if (worksheetRow.IsEmpty())
-            {
-                continue;
-            }
 
-            var terminalCode = NullIfEmpty(ReadString(worksheetRow, terminal?.Index));
-            var hit = _oasa.Find(terminalCode);
-            var ctvm = NormalizeCtvm(hit?.ServiceAccountId);
+            if (worksheetRow.IsEmpty())
+                continue;
+
+            var serviceAccountId = terminal is null
+                ? null
+                : NullIfEmpty(ReadString(worksheetRow, terminal.Index));
+
+            var hit = _oasa.Find(serviceAccountId);
+
+            var ctvm = NormalizeCtvm(hit?.CtvmNumber);
             var ip = ValidIp(hit?.IpAddress);
-            var statusCode = NullIfEmpty(ReadString(worksheetRow, status?.Index));
-            string reason;
+
+            var amountValue = amount is null
+                ? null
+                : ReadDecimal(worksheetRow, amount.Index);
+
+            var transactionDate = date is null
+                ? null
+                : ReadDate(worksheetRow, date.Index);
+
+            var statusCode = status is null
+                ? null
+                : ReadResultCode(worksheetRow, status.Index);
+
             RowDisposition disposition;
-            if (terminalCode is null)
+            string reason;
+
+            if (string.IsNullOrWhiteSpace(serviceAccountId))
             {
                 disposition = RowDisposition.Unclassified;
-                reason = "Κενός κωδικός τερματικού ΟΑΣΑ.";
-                unmatched++;
+                reason = "Δεν υπάρχει κωδικός τερματικού OASA.";
             }
             else if (hit is null)
             {
                 disposition = RowDisposition.Unclassified;
-                reason = _oasa.Count == 0
-                    ? "Δεν έχει φορτωθεί αντιστοιχία τερματικού."
-                    : "Δεν βρέθηκε CTVM για αυτόν τον κωδικό τερματικού.";
-                unmatched++;
+                reason = $"Δεν βρέθηκε ServiceAccountId {serviceAccountId} στο Ips_Oasa.json.";
             }
-            else if (!DeviceCode.IsCtvmCode(ctvm))
+            else if (ctvm is null || !DeviceCode.IsCtvmCode(ctvm))
             {
                 disposition = RowDisposition.Unclassified;
-                reason = "Η αντιστοιχία δεν έχει CTVM και 8 ψηφία.";
-                unmatched++;
-                ctvm = null;
-                ip = null;
+                reason = "Η εγγραφή βρέθηκε, αλλά το CTVM δεν είναι έγκυρο.";
             }
             else if (ip is null)
             {
                 disposition = RowDisposition.NeedsIp;
-                reason = "Βρέθηκε CTVM, χωρίς έγκυρη IP στο Ips_Oasa.json.";
+                reason = $"Βρέθηκε το {ctvm}, αλλά δεν υπάρχει έγκυρη IP.";
             }
             else
             {
-                disposition = RowDisposition.NeedsIp;
-                reason = "ΟΑΣΑ τερματικό αντιστοιχίστηκε σε CTVM και IP.";
+                disposition = RowDisposition.AutomaticYes;
+                reason = $"Βρέθηκε το {ctvm} με IP {ip}.";
             }
 
-            var extra = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["OasaTerminal"] = terminalCode,
-                ["StationName"] = hit?.Station,
-                ["StatusCode"] = statusCode,
-                ["ResolvedIp"] = ip
-            };
+            var extra = extraColumns.ToDictionary(
+                column => column.Header,
+                column => NullIfEmpty(ReadString(worksheetRow, column.Index)),
+                StringComparer.OrdinalIgnoreCase);
+
+            extra["OasaServiceAccountId"] = serviceAccountId;
+            extra["CtvmNumber"] = ctvm;
+            extra["StationName"] = hit?.Station;
+            extra["StatusCode"] = statusCode;
+            extra["ResolvedIp"] = ip;
 
             rows.Add(new ExcelImportRow
             {
                 RowNumber = rowNumber,
-                OasaTerminal = terminalCode,
+                OasaTerminal = serviceAccountId,
                 StationName = hit?.Station,
                 StatusCode = statusCode,
                 ResolvedIp = ip,
                 Disposition = disposition,
                 ScreenReason = reason,
+
                 Immediate = new ImmediateTransactionFacts
                 {
                     ServiceAccountId = ctvm,
-                    Amount = amount is null ? null : ReadDecimal(worksheetRow, amount.Index),
-                    TransactionDate = transactionDate is null ? null : ReadDate(worksheetRow, transactionDate.Index)
+                    Amount = amountValue,
+                    EticketTransactionResult = statusCode,
+                    TransactionDate = transactionDate
                 },
+
                 Archive = new ArchiveDeviceFacts
                 {
                     ExtraCodes = extra
@@ -268,20 +292,23 @@ public sealed class ClosedXmlExcelImportParser : IExcelImportParser
         {
             warnings.Add("Δεν βρέθηκαν γραμμές δεδομένων κάτω από τις κεφαλίδες.");
         }
-        else if (unmatched > 0)
-        {
-            warnings.Add($"{unmatched} γραμμές χωρίς αντιστοιχία CTVM.");
-        }
 
         return new ExcelImportResult
         {
             FileName = fileName,
             Profile = ExcelImportResult.OasaProfile,
             Rows = rows,
-            RecognizedHeaders = mapped.Select(column => column.Header).ToArray(),
+            RecognizedHeaders = mapped
+                .Select(column => column.Header)
+                .ToArray(),
+            ArchiveExtraHeaders = extraColumns
+                .Select(column => column.Header)
+                .ToArray(),
             Warnings = warnings
         };
     }
+
+
 
     private static string? NormalizeCtvm(string? raw)
     {
@@ -420,6 +447,7 @@ public sealed class ClosedXmlExcelImportParser : IExcelImportParser
     private static decimal? ReadDecimal(IXLRow row, int column)
     {
         var cell = row.Cell(column);
+
         if (cell.IsEmpty())
         {
             return null;
@@ -427,18 +455,44 @@ public sealed class ClosedXmlExcelImportParser : IExcelImportParser
 
         if (cell.DataType == XLDataType.Number)
         {
-            return Convert.ToDecimal(cell.GetDouble(), CultureInfo.InvariantCulture);
+            return (decimal)cell.GetDouble();
         }
 
-        var text = cell.GetFormattedString().Trim().Replace("€", string.Empty).Replace(" ", string.Empty);
-        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.GetCultureInfo("el-GR"), out var greek))
+        var text = cell.GetFormattedString()
+            .Trim()
+            .Replace("€", "")
+            .Replace(" ", "");
+
+        // Δοκιμή με τελεία ως decimal separator
+        if (decimal.TryParse(
+            text,
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out var invariant))
+        {
+            return invariant;
+        }
+
+        // Δοκιμή με κόμμα ως decimal separator
+        if (decimal.TryParse(
+            text,
+            NumberStyles.Number,
+            CultureInfo.GetCultureInfo("el-GR"),
+            out var greek))
         {
             return greek;
         }
 
-        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var invariant))
+        // Fallback: κανονικοποίηση τελείας/κόμματος
+        text = text.Replace(',', '.');
+
+        if (decimal.TryParse(
+            text,
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out var normalized))
         {
-            return invariant;
+            return normalized;
         }
 
         return null;

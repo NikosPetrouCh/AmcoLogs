@@ -18,6 +18,10 @@ public sealed class NlogSliceReader
         @"[""']TransactionId[""']\s*:\s*[""']([0-9a-fA-F-]{36})[""']",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex NumericTransactionIdPattern = new(
+    @"\b(?:TxnId|TransactionId)\b[""']?\s*(?:[:=]\s*)?[""']?(\d+)[""']?",
+    RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     public LogSliceResult Read(string path, string transactionId, DateTime? excelTime)
     {
         var wanted = transactionId.Trim();
@@ -59,7 +63,11 @@ public sealed class NlogSliceReader
         return best?.Result ?? Missing("Δε βρέθηκε η συναλλαγή.");
     }
 
-    public LogSliceResult ReadByClock(string path, TimeOnly clock, DateTime? day)
+    public LogSliceResult ReadByClock(
+        string path,
+        TimeOnly clock,
+        DateTime? day,
+        string? transactionId = null)
     {
         var files = PreferPlainLogs(NlogFile.Enumerate(path));
         if (files.Count == 0)
@@ -78,7 +86,7 @@ public sealed class NlogSliceReader
             }
 
             using var stream = NlogFile.OpenRead(file);
-            var hit = ScanClock(stream, clock, file);
+            var hit = ScanClock(stream, clock, transactionId, file);
             if (hit is null)
             {
                 continue;
@@ -189,16 +197,25 @@ public sealed class NlogSliceReader
         return best;
     }
 
-    private static Candidate? ScanClock(Stream log, TimeOnly clock, string file)
+
+    private static Candidate? ScanClock(
+        Stream log,
+        TimeOnly clock,
+        string transactionId,
+        string file)
     {
         Candidate? best = null;
         Window? open = null;
+
         using var reader = new StreamReader(log);
+
         var lineNumber = 0;
         string? raw;
+
         while ((raw = reader.ReadLine()) is not null)
         {
             lineNumber++;
+
             if (!IsSelectingProduct(raw))
             {
                 open?.Add(lineNumber, raw);
@@ -207,7 +224,14 @@ public sealed class NlogSliceReader
 
             if (open is not null)
             {
-                best = ConsiderClock(open, clock, file, raw, lineNumber, best);
+                best = ConsiderClock(
+                    open,
+                    clock,
+                    transactionId,
+                    file,
+                    raw,
+                    lineNumber,
+                    best);
             }
 
             open = Window.Start(lineNumber, raw);
@@ -215,7 +239,14 @@ public sealed class NlogSliceReader
 
         if (open is not null)
         {
-            best = ConsiderClock(open, clock, file, null, 0, best);
+            best = ConsiderClock(
+                open,
+                clock,
+                transactionId,
+                file,
+                null,
+                0,
+                best);
         }
 
         return best;
@@ -224,38 +255,56 @@ public sealed class NlogSliceReader
     private static Candidate? ConsiderClock(
         Window open,
         TimeOnly clock,
+        string transactionId,
         string file,
         string? nextSelecting,
         int nextLine,
         Candidate? best)
     {
+        if (!string.IsNullOrWhiteSpace(transactionId)
+    && !open.Contains(transactionId))
+        {
+            return best;
+        }
+
         if (open.StartTime is null)
         {
             return best;
         }
 
         var target = open.StartTime.Value.Date + clock.ToTimeSpan();
+
         if (open.StartTime.Value > target)
         {
             return best;
         }
 
-        var nextTime = nextSelecting is null ? (DateTime?)null : TimeOf(nextSelecting);
+        var nextTime = nextSelecting is null
+            ? (DateTime?)null
+            : TimeOf(nextSelecting);
+
         if (nextTime is not null && nextTime.Value <= target)
         {
             return best;
         }
 
         var lines = new List<LogSliceLine>
+    {
+        new()
         {
-            new() { LineNumber = open.LineStart, Text = open.StartText, Role = "start" }
-        };
+            LineNumber = open.LineStart,
+            Text = open.StartText,
+            Role = "start"
+        }
+    };
+
         lines.AddRange(open.Body.Select(line => new LogSliceLine
         {
             LineNumber = line.Number,
             Text = line.Text,
             Role = "between"
         }));
+
         if (nextSelecting is not null)
         {
             lines.Add(new LogSliceLine
@@ -267,6 +316,7 @@ public sealed class NlogSliceReader
         }
 
         var distance = (target - open.StartTime.Value).TotalSeconds;
+
         var result = new LogSliceResult
         {
             Found = true,
@@ -276,6 +326,7 @@ public sealed class NlogSliceReader
             LineEnd = nextSelecting is null ? open.LastLine : nextLine,
             Lines = lines
         };
+
         if (best is null || distance < best.Value.Seconds)
         {
             return new Candidate(distance, result);
@@ -459,14 +510,24 @@ public sealed class NlogSliceReader
             foreach (var line in Body)
             {
                 var message = MessageOf(line.Text);
+
                 var created = TransactionIdPattern.Match(message);
-                if (created.Success && string.Equals(created.Groups[1].Value, wanted, StringComparison.OrdinalIgnoreCase))
+                if (created.Success &&
+                    string.Equals(created.Groups[1].Value, wanted, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
 
                 var extra = ExtraTransactionIdPattern.Match(message);
-                if (extra.Success && string.Equals(extra.Groups[1].Value, wanted, StringComparison.OrdinalIgnoreCase))
+                if (extra.Success &&
+                    string.Equals(extra.Groups[1].Value, wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                var numeric = NumericTransactionIdPattern.Match(message);
+                if (numeric.Success &&
+                    string.Equals(numeric.Groups[1].Value, wanted, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
@@ -477,5 +538,6 @@ public sealed class NlogSliceReader
     }
 
     private readonly record struct NumberedLine(int Number, string Text);
+
     private readonly record struct Candidate(double Seconds, LogSliceResult Result);
 }

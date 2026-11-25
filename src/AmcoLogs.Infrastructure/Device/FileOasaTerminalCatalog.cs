@@ -1,70 +1,76 @@
+
+using System.Net;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using AmcoLogs.Core.Device;
 
 namespace AmcoLogs.Infrastructure.Device;
 
 public sealed class FileOasaTerminalCatalog : IOasaTerminalCatalog
 {
-    private readonly Dictionary<string, OasaTerminalHit> _byKey = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, OasaTerminalHit> _byDigits = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OasaTerminalHit> _byServiceAccountId =
+        new(StringComparer.Ordinal);
 
     public FileOasaTerminalCatalog(string? dataDirectory = null)
     {
         var roots = new List<string>();
+
         if (!string.IsNullOrWhiteSpace(dataDirectory))
         {
             roots.Add(dataDirectory);
         }
 
         roots.Add(Path.Combine(AppContext.BaseDirectory, "data"));
-        foreach (var root in roots)
+
+        foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var path = Path.Combine(root, "Ips_Oasa.json");
-            if (!File.Exists(path))
+            var files = new[]
             {
-                continue;
+        "Ips_Oasa_Metro.json",
+        "Ips_Oasa_Tram.json"
+    };
+
+            foreach (var file in files)
+            {
+                var path = Path.Combine(root, file);
+
+                if (File.Exists(path))
+                {
+                    Load(path);
+                }
             }
 
-            Load(path);
-            if (_byKey.Count > 0)
+            if (_byServiceAccountId.Count > 0)
             {
                 break;
             }
         }
     }
 
-    public int Count => _byKey.Count;
+    public int Count => _byServiceAccountId.Count;
 
-    public OasaTerminalHit? Find(string? terminal)
+    public OasaTerminalHit? Find(string? serviceAccountId)
     {
-        var key = Normalize(terminal);
+        var key = NormalizeServiceAccountId(serviceAccountId);
+
         if (key.Length == 0)
         {
             return null;
         }
 
-        if (_byKey.TryGetValue(key, out var hit))
-        {
-            return hit;
-        }
-
-        var digits = Digits(key);
-        if (digits.Length == 0)
-        {
-            return null;
-        }
-
-        return _byDigits.TryGetValue(digits, out hit) ? hit : null;
+        return _byServiceAccountId.TryGetValue(key, out var hit)
+            ? hit
+            : null;
     }
 
     private void Load(string path)
     {
-        var json = Regex.Replace(File.ReadAllText(path), @"\}\s*\{", "},{");
-        using var document = JsonDocument.Parse(json);
-        if (document.RootElement.ValueKind == JsonValueKind.Array)
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+
+        var root = document.RootElement;
+
+        if (root.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in document.RootElement.EnumerateArray())
+            foreach (var item in root.EnumerateArray())
             {
                 Add(item);
             }
@@ -72,36 +78,77 @@ public sealed class FileOasaTerminalCatalog : IOasaTerminalCatalog
             return;
         }
 
-        if (document.RootElement.ValueKind == JsonValueKind.Object)
+        if (root.ValueKind == JsonValueKind.Object)
         {
-            Add(document.RootElement);
+            Add(root);
         }
     }
 
     private void Add(JsonElement item)
     {
-        var terminal = Read(item, "terminal", "oasa", "oasaTerminal", "code");
-        var ctvm = Read(item, "ctvm", "CTVM", "serviceAccountId", "serviceAccount");
-        var ip = Read(item, "ip", "IP", "ipAddress");
-        var station = Read(item, "station", "stationName", "name", "stop");
-        if (string.IsNullOrWhiteSpace(terminal) || string.IsNullOrWhiteSpace(ctvm) || string.IsNullOrWhiteSpace(ip))
+        var serviceAccountId = Read(
+            item,
+            "serviceAccountId",
+            "serviceAccount",
+            "ServiceAccountId");
+
+        var ctvmNumber = Read(
+            item,
+            "ctvmNumber",
+            "CTVMNumber",
+            "ctvm",
+            "CTVM");
+
+        var ip = Read(
+            item,
+            "routerIp",
+            "RouterIp",
+            "ipAddress",
+            "ip",
+            "IP");
+
+        var station = Read(
+            item,
+            "station",
+            "stationName",
+            "name",
+            "stop");
+
+        if (string.IsNullOrWhiteSpace(serviceAccountId)
+            || string.IsNullOrWhiteSpace(ctvmNumber)
+            || string.IsNullOrWhiteSpace(ip))
+        {
+            return;
+        }
+
+        var normalizedId = NormalizeServiceAccountId(serviceAccountId);
+
+        if (normalizedId.Length == 0)
+        {
+            return;
+        }
+
+        if (!DeviceCode.IsCtvmCode(ctvmNumber))
+        {
+            return;
+        }
+
+        if (!IPAddress.TryParse(ip.Trim(), out _))
         {
             return;
         }
 
         var hit = new OasaTerminalHit
         {
-            Terminal = terminal.Trim(),
-            ServiceAccountId = ctvm.Trim(),
+            ServiceAccountId = normalizedId,
+            CtvmNumber = NormalizeCtvm(ctvmNumber),
             IpAddress = ip.Trim(),
-            Station = string.IsNullOrWhiteSpace(station) ? null : station.Trim()
+            Station = string.IsNullOrWhiteSpace(station)
+                ? null
+                : station.Trim()
         };
-        _byKey[Normalize(terminal)] = hit;
-        var digits = Digits(terminal);
-        if (digits.Length > 0)
-        {
-            _byDigits[digits] = hit;
-        }
+
+        _byServiceAccountId[normalizedId] = hit;
     }
 
     private static string? Read(JsonElement element, params string[] names)
@@ -127,12 +174,20 @@ public sealed class FileOasaTerminalCatalog : IOasaTerminalCatalog
         return null;
     }
 
-    private static string Normalize(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
-
-    private static string Digits(string value)
+    private static string NormalizeServiceAccountId(string? value)
     {
-        var digits = new string(value.Where(char.IsDigit).ToArray());
-        return digits.TrimStart('0');
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value.Trim().Where(char.IsDigit).ToArray());
+    }
+
+    private static string NormalizeCtvm(string value)
+    {
+        var digits = DeviceCode.Digits(value);
+
+        return "CTVM" + digits;
     }
 }

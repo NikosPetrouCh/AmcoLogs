@@ -1,3 +1,4 @@
+
 using System.Text.RegularExpressions;
 using AmcoLogs.Core.Logs;
 
@@ -5,22 +6,25 @@ namespace AmcoLogs.Infrastructure.Logs;
 
 public sealed class NlogSaleLocator : INlogSaleLocator
 {
-    private const int MaxWindowLines = 250;
     private static readonly Regex LinePattern = new(
-        @"^(?<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\|(?<level>\w+)\s+\|(?<logger>[^|]+)\|(?<message>.*)$",
+        @"^(?<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)\s*\|\s*(?<level>\w+)\s*\|\s*(?<logger>[^|]+)\|\s*(?<message>.*)$",
         RegexOptions.Compiled);
-    private static readonly Regex TransactionIdPattern = new(
-        @"Creating new transaction with id:\s*([0-9a-fA-F-]{36})",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex ExtraTransactionIdPattern = new(
-        @"[""']TransactionId[""']\s*:\s*[""']([0-9a-fA-F-]{36})[""']",
+
+    // Numeric Transaction ID from the MQTT debitStart payload.
+    private static readonly Regex TxnIdPattern = new(
+        @"""?TxnId""?\s*:\s*""?(\d+)""?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public LogInspectResult Inspect(Stream log, IReadOnlyCollection<string> transactionIds)
+    public LogInspectResult Inspect(
+        Stream log,
+        IReadOnlyCollection<string> transactionIds)
     {
         var wanted = new HashSet<string>(
-            transactionIds.Where(id => !string.IsNullOrWhiteSpace(id)).Select(NormalizeId),
+            transactionIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(NormalizeId),
             StringComparer.OrdinalIgnoreCase);
+
         if (wanted.Count == 0)
         {
             return new LogInspectResult
@@ -34,26 +38,46 @@ public sealed class NlogSaleLocator : INlogSaleLocator
         }
 
         var sales = new List<CardSaleWindow>();
-        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var found = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
+
         var selectingCount = 0;
         var cardCount = 0;
 
         SaleBuffer? open = null;
+
         string? pendingError = null;
         int pendingErrorLine = 0;
         string pendingErrorTime = "";
         string pendingErrorLogger = "";
 
         using var reader = new StreamReader(log);
+
         var lineNumber = 0;
         string? raw;
+
         while ((raw = reader.ReadLine()) is not null)
         {
             lineNumber++;
+
             var match = LinePattern.Match(raw);
+
+            // Multiline MQTT payload:
+            // TxnId may appear on a continuation line
+            // that does not have the standard NLog prefix.
             if (!match.Success)
             {
-                if (pendingError is not null && pendingError.Length < 800)
+                if (open is not null)
+                {
+                    CaptureTransactionId(raw, open, wanted);
+
+                    open.LineEnd = lineNumber;
+                    open.LineCount++;
+                }
+
+                if (pendingError is not null &&
+                    pendingError.Length < 800)
                 {
                     pendingError += " " + raw.Trim();
                 }
@@ -61,23 +85,47 @@ public sealed class NlogSaleLocator : INlogSaleLocator
                 continue;
             }
 
-            FlushPendingError(open, ref pendingError, pendingErrorLine, pendingErrorTime, pendingErrorLogger);
+            FlushPendingError(
+                open,
+                ref pendingError,
+                pendingErrorLine,
+                pendingErrorTime,
+                pendingErrorLogger);
 
             var level = match.Groups["level"].Value.Trim();
             var logger = match.Groups["logger"].Value.Trim();
             var message = match.Groups["message"].Value.Trim();
             var time = match.Groups["time"].Value;
 
-            if (message.StartsWith("Selecting product", StringComparison.OrdinalIgnoreCase))
+            // Every Selecting product starts a new transaction window.
+            // The previous window ends immediately before this one.
+            if (message.StartsWith(
+                "Selecting product",
+                StringComparison.OrdinalIgnoreCase))
             {
                 selectingCount++;
-                FlushPendingError(open, ref pendingError, pendingErrorLine, pendingErrorTime, pendingErrorLogger);
-                CloseWindow(open, wanted, found, sales, ref cardCount);
+
+                FlushPendingError(
+                    open,
+                    ref pendingError,
+                    pendingErrorLine,
+                    pendingErrorTime,
+                    pendingErrorLogger);
+
+                CloseWindow(
+                    open,
+                    wanted,
+                    found,
+                    sales,
+                    ref cardCount);
+
                 open = new SaleBuffer
                 {
                     LineStart = lineNumber,
+                    LineEnd = lineNumber,
                     StartTime = time,
-                    Product = message["Selecting product".Length..].Trim()
+                    Product = message[
+                        "Selecting product".Length..].Trim()
                 };
             }
 
@@ -89,52 +137,62 @@ public sealed class NlogSaleLocator : INlogSaleLocator
             open.LineEnd = lineNumber;
             open.LineCount++;
 
-            if (message.Contains("Setting payment method to: Card", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("Payment Method: (Card)", StringComparison.OrdinalIgnoreCase))
+            // Payment method information.
+            if (message.Contains(
+                "Setting payment method to: Card",
+                StringComparison.OrdinalIgnoreCase)
+                || message.Contains(
+                "Payment Method: (Card)",
+                StringComparison.OrdinalIgnoreCase))
             {
                 open.IsCard = true;
             }
 
-            if (message.Contains("Setting payment method to: Cash", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("Payment Method: (Cash)", StringComparison.OrdinalIgnoreCase))
+            if (message.Contains(
+                "Setting payment method to: Cash",
+                StringComparison.OrdinalIgnoreCase)
+                || message.Contains(
+                "Payment Method: (Cash)",
+                StringComparison.OrdinalIgnoreCase))
             {
                 open.IsCash = true;
             }
 
-            var idMatch = TransactionIdPattern.Match(message);
-            if (idMatch.Success)
-            {
-                open.TransactionId = NormalizeId(idMatch.Groups[1].Value);
-            }
-            else if (string.IsNullOrWhiteSpace(open.TransactionId))
-            {
-                var extraId = ExtraTransactionIdPattern.Match(message);
-                if (extraId.Success)
-                {
-                    open.TransactionId = NormalizeId(extraId.Groups[1].Value);
-                }
-            }
+            // Find the numeric Transaction ID.
+            CaptureTransactionId(raw, open, wanted);
 
-            if (string.Equals(level, "ERROR", StringComparison.OrdinalIgnoreCase))
+            // Keep errors associated with the current product window.
+            if (string.Equals(
+                level,
+                "ERROR",
+                StringComparison.OrdinalIgnoreCase))
             {
                 pendingError = message;
                 pendingErrorLine = lineNumber;
                 pendingErrorTime = time;
                 pendingErrorLogger = logger;
             }
-
-            if (open.LineCount >= MaxWindowLines)
-            {
-                FlushPendingError(open, ref pendingError, pendingErrorLine, pendingErrorTime, pendingErrorLogger);
-                CloseWindow(open, wanted, found, sales, ref cardCount);
-                open = null;
-            }
         }
 
-        FlushPendingError(open, ref pendingError, pendingErrorLine, pendingErrorTime, pendingErrorLogger);
-        CloseWindow(open, wanted, found, sales, ref cardCount);
+        // Close the last transaction window at EOF.
+        FlushPendingError(
+            open,
+            ref pendingError,
+            pendingErrorLine,
+            pendingErrorTime,
+            pendingErrorLogger);
 
-        var notFound = wanted.Where(id => !found.Contains(id)).OrderBy(id => id).ToArray();
+        CloseWindow(
+            open,
+            wanted,
+            found,
+            sales,
+            ref cardCount);
+
+        var notFound = wanted
+            .Where(id => !found.Contains(id))
+            .OrderBy(id => id)
+            .ToArray();
 
         return new LogInspectResult
         {
@@ -146,6 +204,42 @@ public sealed class NlogSaleLocator : INlogSaleLocator
         };
     }
 
+    private static void CaptureTransactionId(
+        string text,
+        SaleBuffer open,
+        HashSet<string> wanted)
+    {
+        var match = TxnIdPattern.Match(text);
+
+        if (!match.Success)
+        {
+            return;
+        }
+
+        var transactionId = NormalizeId(
+            match.Groups[1].Value);
+
+        if (string.IsNullOrWhiteSpace(transactionId))
+        {
+            return;
+        }
+
+        // Prefer an ID that actually exists in the Excel input.
+        // This prevents an unrelated TxnId from replacing
+        // the transaction we are looking for.
+        if (wanted.Contains(transactionId))
+        {
+            open.TransactionId = transactionId;
+            return;
+        }
+
+        // Keep the first available ID as a fallback.
+        if (string.IsNullOrWhiteSpace(open.TransactionId))
+        {
+            open.TransactionId = transactionId;
+        }
+    }
+
     private static void CloseWindow(
         SaleBuffer? open,
         HashSet<string> wanted,
@@ -153,23 +247,32 @@ public sealed class NlogSaleLocator : INlogSaleLocator
         List<CardSaleWindow> sales,
         ref int cardCount)
     {
-        if (open is null)
+        if (open is null ||
+            string.IsNullOrWhiteSpace(open.TransactionId))
         {
             return;
         }
 
-        if (!open.IsCard || open.IsCash || string.IsNullOrWhiteSpace(open.TransactionId))
+        // Count actual card windows separately.
+        if (open.IsCard && !open.IsCash)
         {
-            return;
+            cardCount++;
         }
 
-        cardCount++;
+        // Transaction ID is the primary matching criterion.
+        // Do not reject a matching transaction just because
+        // the payment-method log message was not detected.
         if (!wanted.Contains(open.TransactionId))
         {
             return;
         }
 
-        found.Add(open.TransactionId);
+        // Avoid duplicate results for the same Transaction ID.
+        if (!found.Add(open.TransactionId))
+        {
+            return;
+        }
+
         sales.Add(new CardSaleWindow
         {
             TransactionId = open.TransactionId,
@@ -202,21 +305,33 @@ public sealed class NlogSaleLocator : INlogSaleLocator
             Logger = logger,
             Message = pendingError
         });
+
         pendingError = null;
     }
 
-    private static string NormalizeId(string value) => value.Trim();
+    private static string NormalizeId(string value)
+    {
+        return value.Trim();
+    }
 
     private sealed class SaleBuffer
     {
         public int LineStart { get; init; }
+
         public int LineEnd { get; set; }
+
         public int LineCount { get; set; }
+
         public string? StartTime { get; init; }
+
         public string? Product { get; init; }
+
         public string? TransactionId { get; set; }
+
         public bool IsCard { get; set; }
+
         public bool IsCash { get; set; }
+
         public List<SaleError> Errors { get; } = [];
     }
 }

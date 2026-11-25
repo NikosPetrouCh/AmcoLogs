@@ -18,6 +18,11 @@ public sealed class ExcelImportRow
     public DeviceMobility Mobility => DeviceCode.Classify(Immediate.ServiceAccountId);
     public bool HasServiceAccountId => !string.IsNullOrWhiteSpace(Immediate.ServiceAccountId);
 
+    public string? InvestigationServiceAccountId =>
+    !string.IsNullOrWhiteSpace(OasaTerminal)
+        ? OasaTerminal.Trim()
+        : Immediate.ServiceAccountId?.Trim();
+
     public ExcelImportRow WithScreen(RowDisposition disposition, string? decision, string reason) => new()
     {
         RowNumber = RowNumber,

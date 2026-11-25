@@ -1,0 +1,80 @@
+[
+  {
+    "station": "ΓΗΠ. ΚΑΡΑΙΣΚΑΚΗ",
+    "ctvmNumber": "CTVM51239450",
+    "serviceAccountId": "1000002457",
+    "routerIp": "10.232.252.31"
+  },
+  {
+    "station": "ΑΚΤΗ ΠΟΣΕΙΔΩΝΟΣ",
+    "ctvmNumber": "CTVM51239452",
+    "serviceAccountId": "1000002458",
+    "routerIp": "10.232.244.32"
+  },
+  {
+    "station": "ΔΗΜΑΡΧΕΙΟ",
+    "ctvmNumber": "CTVM51239453",
+    "serviceAccountId": "1000002459",
+    "routerIp": "10.232.254.31"
+  },
+  {
+    "station": "ΑΝΔΡΟΥΤΣΟΥ",
+    "ctvmNumber": "CTVM51239454",
+    "serviceAccountId": "1000002460",
+    "routerIp": "10.232.248.31"
+  },
+  {
+    "station": "ΟΜ. ΣΚΥΛΙΤΣΗ",
+    "ctvmNumber": "CTVM51239455",
+    "serviceAccountId": "1000002461",
+    "routerIp": "10.232.249.31"
+  },
+  {
+    "station": "ΜΙΚΡΑΣ ΑΣΙΑΣ",
+    "ctvmNumber": "CTVM51239456",
+    "serviceAccountId": "1000002462",
+    "routerIp": "10.232.253.31"
+  },
+  {
+    "station": "ΠΛΑΤΕΙΑ ΔΕΛΗΓΙΑΝΝΗ",
+    "ctvmNumber": "CTVM51239474",
+    "serviceAccountId": "1000002491",
+    "routerIp": "10.232.243.32"
+  },
+  {
+    "station": "ΕΥΑΓΓΕΛΙΣΤΡΙΑ",
+    "ctvmNumber": "CTVM51239475",
+    "serviceAccountId": "1000002492",
+    "routerIp": "10.232.242.32"
+  },
+  {
+    "station": "ΛΑΜΠΡΑΚΗ",
+    "ctvmNumber": "CTVM51239476",
+    "serviceAccountId": "1000002493",
+    "routerIp": "10.232.241.32"
+  },
+  {
+    "station": "34ου ΣΥΝΤ. ΠΕΖΙΚΟΥ",
+    "ctvmNumber": "CTVM51239477",
+    "serviceAccountId": "1000002494",
+    "routerIp": "10.232.247.32"
+  },
+  {
+    "station": "ΑΓΙΑ ΤΡΙΑΔΑ",
+    "ctvmNumber": "CTVM51239478",
+    "serviceAccountId": "1000002495",
+    "routerIp": "10.232.245.32"
+  },
+  {
+    "station": "ΠΛΑΤΕΙΑ ΙΠΠΟΔΑΜΕΙΑΣ",
+    "ctvmNumber": "CTVM51239479",
+    "serviceAccountId": "1000002496",
+    "routerIp": "10.232.246.32"
+  },
+  {
+    "station": "ΑΚΤΗ ΠΟΣΕΙΔΩΝΟΣ",
+    "ctvmNumber": "CTVM51239483",
+    "serviceAccountId": "1000002502",
+    "routerIp": "10.232.244.33"
+  }
+]

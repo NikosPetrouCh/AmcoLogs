@@ -34,13 +34,16 @@ button, input {
 }
 
 .rail {
-  background: var(--rail);
-  color: var(--rail-text);
-  padding: 28px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
+    background: var(--rail);
+    color: var(--rail-text);
+    padding: 28px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    min-height: 100vh;
+    box-sizing: border-box;
 }
+
 
 .brand {
   display: flex;
@@ -260,11 +263,11 @@ button, input {
 }
 
 .db-nav {
-  margin-top: auto;
-  padding-top: 20px;
-  border-top: 1px solid #1e3348;
-  display: grid;
-  gap: 6px;
+    margin-top: auto;
+    padding-top: 20px;
+    border-top: 1px solid #1e3348;
+    display: grid;
+    gap: 6px;
 }
 
 .db-nav-title {
@@ -890,12 +893,128 @@ th {
 }
 
 @media (max-width: 1100px) {
-  .app {
-    grid-template-columns: 1fr;
-  }
-
   .entry-grid,
   .entry-choice {
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-height: 700px) {
+    .rail {
+        min-height: auto;
+        height: auto;
+    }
+}
+
+
+/* Responsive layout */
+@media (max-width: 1100px) {
+
+    .app {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "brand"
+            "pipeline"
+            "stage"
+            "database";
+        min-height: 100vh;
+    }
+
+    /* Make rail children independent grid items */
+    .rail {
+        display: contents;
+    }
+
+    /* Brand */
+    .brand {
+        grid-area: brand;
+        background: var(--rail);
+        padding: 20px 22px 14px;
+        box-sizing: border-box;
+    }
+
+    /* First menu */
+    .pipeline {
+        grid-area: pipeline;
+        background: var(--rail);
+        padding: 12px 22px 20px;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 12px;
+        box-sizing: border-box;
+    }
+
+        .pipeline li {
+            flex: 1 1 150px;
+            min-width: 0;
+        }
+
+    /* Main content / Drop File */
+    .stage {
+        grid-area: stage;
+        min-width: 0;
+        padding: 28px 24px 36px;
+    }
+
+    /* Second menu */
+    .db-nav {
+        grid-area: database;
+        background: var(--rail);
+        color: var(--rail-text);
+        margin-top: 0;
+        padding: 18px 22px 22px;
+        border-top: 1px solid #1e3348;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 14px;
+        box-sizing: border-box;
+    }
+
+    .db-nav-title {
+        width: 100%;
+        margin: 0 0 4px;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: #9aabbd;
+    }
+
+    .db-link {
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--rail-text);
+        text-align: left;
+        padding: 8px 10px;
+        opacity: 0.85;
+    }
+
+        .db-link:hover {
+            opacity: 1;
+        }
+
+    .db-dot {
+        flex-basis: auto;
+        margin: 0 0 0 auto;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    /* Other responsive elements */
+    .split {
+        grid-template-columns: 1fr;
+    }
+
+    .entry-grid,
+    .entry-choice {
+        grid-template-columns: 1fr;
+    }
+
+    .categories {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+

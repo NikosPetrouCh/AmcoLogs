@@ -168,7 +168,15 @@ public sealed class LogsController : ControllerBase
 
         if (TransactionClock.TryParse(clockText, out var clock))
         {
-            return Ok(WithFlow(_slices.ReadByClock(request.Path, clock, request.TransactionDate), request.Profile, request.Path, clockText));
+            return Ok(WithFlow(
+    _slices.ReadByClock(
+        request.Path,
+        clock,
+        request.TransactionDate,
+        request.TransactionId),
+    request.Profile,
+    request.Path,
+    clockText));
         }
 
         if (string.IsNullOrWhiteSpace(request.TransactionId))

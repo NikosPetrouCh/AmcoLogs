@@ -202,6 +202,10 @@ let reachedIps = false;
 let lastFindings = [];
 let generalDay = null;
 let generalBatchId = null;
+let currentBatchId = null;
+let investigationDevices = [];
+let selectedInvestigationDeviceId = null;
+let deviceWorkflowActive = false;
 
 browse.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => {
@@ -275,6 +279,23 @@ dbForm.addEventListener("submit", async (event) => {
   }
 });
 
+async function loadInvestigationDevices() {
+    if (!currentBatchId) {
+        console.warn("Δεν υπάρχει ενεργό Batch ID.");
+        return [];
+    }
+
+    const response = await fetch(
+        `/api/devices/investigation/${currentBatchId}`
+    );
+
+    if (!response.ok) {
+        throw new Error("Αποτυχία φόρτωσης συσκευών.");
+    }
+
+    return await response.json();
+}
+
 async function uploadExcel(file) {
   setStatus("Διάβασμα " + file.name + "...");
   const body = new FormData();
@@ -288,11 +309,22 @@ async function uploadExcel(file) {
     setStatus(payload.message || "Αποτυχία εισαγωγής.", true);
     return;
   }
-  renderImport(payload);
+
+  await renderImport(payload);
 }
 
-function renderImport(payload) {
+console.log("Excel payload saved:", payload.saved);
+async function renderImport(payload) {
   const importData = payload.import;
+    currentBatchId = payload.saved?.batchId || null;
+    console.log("Current Batch ID:", currentBatchId);
+    try {
+        investigationDevices = await loadInvestigationDevices();
+        console.log("Investigation devices:", investigationDevices);
+    } catch (error) {
+        console.error("Σφάλμα φόρτωσης συσκευών:", error);
+        investigationDevices = [];
+    }
   importedRows = importData.rows || [];
   importProfile = importData.profile || "OSETH";
   fileName = importData.fileName;
@@ -340,14 +372,12 @@ async function submitDeviceEntry(data) {
     setDeviceError("Το CTVM πρέπει να είναι CTVM και 8 ψηφία.");
     return;
   }
-  if (searchMode === "transaction" && logService === "middleware" && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clockTime)) {
-    setDeviceError("Η ώρα της συναλλαγής γράφεται 08:23.");
-    return;
-  }
-  if (searchMode === "transaction" && !logDate) {
-    setDeviceError("Χρειάζεται η ημερομηνία του log.");
-    return;
-  }
+
+  if (searchMode === "transaction" && logService === "middleware" && clockTime && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clockTime)) {
+        setDeviceError("Η ώρα της συναλλαγής γράφεται 08:23.");
+        return;
+    }
+
   if (searchMode === "range" && (!rangeFrom || !rangeUntil || rangeUntil < rangeFrom)) {
     setDeviceError("Το εύρος χρειάζεται από και έως, με το έως μετά το από.");
     return;
@@ -381,14 +411,14 @@ async function submitDeviceEntry(data) {
     stationName: hit.station || null,
     logService,
     operator,
-    clockTime: searchMode === "transaction" && logService === "middleware" ? clockTime : null,
+    clockTime: searchMode === "transaction" && logService === "middleware" ? (clockTime || null) : null,
     searchMode,
     rangeFrom: searchMode === "range" ? rangeFrom : null,
     rangeUntil: searchMode === "range" ? rangeUntil : null,
     grepText: searchMode === "range" ? grepText : null,
     immediate: {
       serviceAccountId: ctvm,
-      transactionDate: searchMode === "range" ? rangeFrom : logDate,
+      transactionDate: searchMode === "range" ? rangeFrom : (logDate || null),
       amount: null,
       eticketTransactionResult: null,
       rrn: null,
@@ -462,24 +492,50 @@ function renderDeviceScreen() {
 }
 
 function renderOasaScreen() {
-  const ready = importedRows.filter((row) => row.disposition === "NeedsIp" && row.resolvedIp);
-  const needsIp = importedRows.filter((row) => row.disposition === "NeedsIp" && !row.resolvedIp);
-  const unmatched = importedRows.filter((row) => row.disposition !== "NeedsIp");
+    const ready = importedRows.filter((row) => row.resolvedIp);
+
+    const needsIp = importedRows.filter(
+        (row) => !row.resolvedIp && row.immediate?.serviceAccountId
+    );
+
+    const unmatched = importedRows.filter(
+        (row) => !row.immediate?.serviceAccountId
+    );
+    const type03 = importedRows.filter(
+        row => row.statusCode === "03"
+    );
+
+    const type02Yes = importedRows.filter(
+        row => row.statusCode === "02" &&
+            row.disposition === "AutomaticYes"
+    );
+
+    const type02Pending = importedRows.filter(
+        row => row.statusCode === "02" &&
+            row.disposition === "NeedsIp"
+    );
   categories.hidden = false;
   categories.innerHTML = `
-    <div class="result-card yes">
-      <div class="result-code">${ready.length}</div>
-      <p class="result-meta">με CTVM και IP</p>
-    </div>
-    <div class="result-card ip">
-      <div class="result-code">${needsIp.length}</div>
-      <p class="result-meta">με CTVM, χωρίς IP</p>
-    </div>
     <div class="result-card out">
       <div class="result-code">${unmatched.length}</div>
       <p class="result-meta">χωρίς αντιστοιχία</p>
     </div>
-  `;
+
+    <div class="result-card yes">
+      <div class="result-code">${type03.length}</div>
+      <p class="result-meta">Τύπος 03 · Αυτόματο YES</p>
+    </div>
+
+    <div class="result-card yes">
+      <div class="result-code">${type02Yes.length}</div>
+      <p class="result-meta">Τύπος 02 · 0,02 € · YES</p>
+    </div>
+
+    <div class="result-card ip">
+      <div class="result-code">${type02Pending.length}</div>
+      <p class="result-meta">Τύπος 02 · Εκκρεμεί</p>
+    </div>
+`;
   selection.hidden = false;
   selection.innerHTML = `
     <h2>ΟΑΣΑ</h2>
@@ -487,88 +543,260 @@ function renderOasaScreen() {
     ${importedRows.length ? `<details open><summary>Γραμμές · ${importedRows.length}</summary>${oasaTable(importedRows)}</details>` : ""}
     <div class="actions">
       <button type="button" class="primary" id="to-ips" onclick="goToStep(${devices.length ? 2 : 4})" ${importedRows.length ? "" : "disabled"}>${devices.length ? "Συνέχεια στις IPs" : "Συνέχεια στο πόρισμα"}</button>
-      <button type="button" onclick="fileOasaCase('METRO')">Καταχώρηση Daily Exceptions · METRO</button>
     </div>
   `;
 }
 
 function oasaTable(rows) {
-  return renderTable(
-    ["Τερματικό", "CTVM", "IP", "Ημερομηνία", "Ποσό", "Κωδ. κατάστασης", "Λόγος"],
-    rows.map((row) => [
-      row.oasaTerminal || "",
-      row.immediate?.serviceAccountId || "",
-      row.resolvedIp || "",
-      row.immediate?.transactionDate ? String(row.immediate.transactionDate).slice(0, 16).replace("T", " ") : "",
-      row.immediate?.amount ?? "",
-      row.statusCode || "",
-      row.screenReason || ""
-    ])
-  );
+    return renderTable(
+        [
+            "Τερματικό",
+            "CTVM",
+            "IP",
+            "Σταθμός",
+            "Ημερομηνία",
+            "Ποσό",
+            "Κωδ. κατάστασης",
+            "Κατηγορία",
+            "Απόφαση",
+            "Λόγος"
+        ],
+        rows.map((row) => [
+            row.oasaTerminal || "",
+            row.immediate?.serviceAccountId || "",
+            row.resolvedIp || "",
+            row.stationName || "",
+            row.immediate?.transactionDate
+                ? String(row.immediate.transactionDate).slice(0, 16).replace("T", " ")
+                : "",
+            row.immediate?.amount ?? "",
+            row.statusCode || "",
+            row.disposition || "",
+            row.decision || "",
+            row.screenReason || ""
+        ])
+    );
 }
 
-function renderScreen() {
-  const yesType03 = rowsByDisposition("AutomaticYes").filter((row) => resultCode(row) === "03");
-  const yesTwoCents = rowsByDisposition("AutomaticYes").filter((row) => resultCode(row) !== "03");
-  const pending = needsIpRows();
-  const excludedId = rowsByDisposition("ExcludedInvalidServiceAccount");
-  const excludedType = rowsByDisposition("ExcludedType04");
-  const other = rowsByDisposition("Unclassified");
-  const excluded = excludedId.length + excludedType.length;
-  const continueLabel = pending.length ? "Συνέχεια στις IPs" : "Συνέχεια στο πόρισμα";
-  const continueStep = pending.length ? 2 : 4;
+function startBatchWorkflow() {
+    deviceWorkflowActive = false;
+    selectedInvestigationDeviceId = null;
 
-  categories.hidden = false;
-  categories.innerHTML = `
+    currentStep = 2;
+    currentView = "flow";
+
+    renderApp();
+}
+
+function startIndividualWorkflow() {
+    deviceWorkflowActive = true;
+    selectedInvestigationDeviceId = null;
+
+    setStatus("Επίλεξε τη συσκευή που θέλεις να διαχειριστείς.");
+
+    renderScreen();
+}
+
+function returnToDeviceList() {
+    selectedInvestigationDeviceId = null;
+    deviceWorkflowActive = true;
+
+    currentStep = 1;
+    currentView = "flow";
+
+    renderApp();
+}
+
+function selectInvestigationDevice(deviceId) {
+    selectedInvestigationDeviceId = deviceId;
+    deviceWorkflowActive = true;
+
+    const device = investigationDevices.find(
+        (item) => item.id === deviceId
+    );
+
+    const sourceDevice = devices.find(
+        (item) => item.serviceAccountId === device?.serviceAccountId
+    );
+
+    if (!sourceDevice) {
+        console.warn("Δεν βρέθηκαν τα στοιχεία της συσκευής.");
+        return;
+    }
+
+    currentStep = 2;
+    reachedIps = true;
+    currentView = "flow";
+
+    renderApp();
+}
+
+
+function renderScreen() {
+    const yesType03 = rowsByDisposition("AutomaticYes")
+        .filter((row) => resultCode(row) === "03");
+
+    const yesTwoCents = rowsByDisposition("AutomaticYes")
+        .filter((row) => resultCode(row) !== "03");
+
+    const pending = needsIpRows();
+
+    const excludedId = rowsByDisposition("ExcludedInvalidServiceAccount");
+    const excludedType = rowsByDisposition("ExcludedType04");
+
+    const other = rowsByDisposition("Unclassified");
+
+    const excluded = excludedId.length + excludedType.length;
+
+    const continueLabel = pending.length
+        ? "Συνέχεια στις IPs"
+        : "Συνέχεια στο πόρισμα";
+
+    const continueStep = pending.length ? 2 : 4;
+
+    categories.hidden = false;
+
+    categories.innerHTML = `
+    <div class="result-card yes">
+      <div class="result-code">02</div>
+      <p class="result-meta">
+        ${countLabel(pending.length, "συναλλαγή", "συναλλαγές")} · Αναζήτηση IP
+      </p>
+    </div>
+
     <div class="result-card yes">
       <div class="result-code">03</div>
-      <p class="result-meta">${countLabel(yesType03.length, "συναλλαγή", "συναλλαγές")} · YES</p>
+      <p class="result-meta">
+        ${countLabel(yesType03.length, "συναλλαγή", "συναλλαγές")} · YES
+      </p>
     </div>
+
     <div class="result-card yes">
       <div class="result-code">0,02</div>
-      <p class="result-meta">${countLabel(yesTwoCents.length, "συναλλαγή", "συναλλαγές")} · τύπος 02, YES</p>
+      <p class="result-meta">
+        ${countLabel(yesTwoCents.length, "συναλλαγή", "συναλλαγές")} · τύπος 02, YES
+      </p>
     </div>
-    <div class="result-card ip">
-      <div class="result-code">02</div>
-      <p class="result-meta">${countLabel(pending.length, "συναλλαγή", "συναλλαγές")} · μένουν για εύρεση IP</p>
-    </div>
+
     <div class="result-card out">
       <div class="result-code word">ΕΚΤΟΣ</div>
-      <p class="result-meta">${countLabel(excluded, "συναλλαγή", "συναλλαγές")} · άκυρο CTVM ή τύπος 04</p>
+      <p class="result-meta">
+        ${countLabel(excluded, "συναλλαγή", "συναλλαγές")} · άκυρο CTVM ή τύπος 04
+      </p>
     </div>
   `;
 
-  selection.hidden = false;
-  selection.innerHTML = `
+    selection.hidden = false;
+
+    selection.innerHTML = `
+    <h2 class="screen-next">Τύπος 02 για IP</h2>
+
+    <p>
+      ${countLabel(pending.length, "συναλλαγή", "συναλλαγές")}
+      από ${countLabel(devices.length, "συσκευή", "συσκευές")}.
+      Ποσό διαφορετικό από 0,02. Η απόφασή τους βγαίνει στο πόρισμα.
+    </p>
+
+    ${pending.length ? `
+      <details>
+        <summary>Προβολή γραμμών</summary>
+        ${screenTable(pending, false)}
+      </details>
+    ` : ""}
+
+    <div class="actions">
+      <button
+        type="button"
+        class="primary"
+        id="to-ips"
+        onclick="goToStep(${continueStep})"
+        ${importedRows.length ? "" : "disabled"}>
+        ${continueLabel}
+      </button>
+    </div>
+
     <h2>YES</h2>
-    <p>Φαίνονται εδώ και κλείνουν ως YES στο πόρισμα. Δεν πάνε για IP.</p>
+
+    <p>
+      Φαίνονται εδώ και κλείνουν ως YES στο πόρισμα.
+      Δεν πάνε για IP.
+    </p>
+
     <details>
       <summary>Τύπος 03 · ${yesType03.length}</summary>
-      ${yesType03.length ? screenTable(yesType03, true) : "<p>Καμία γραμμή.</p>"}
+      ${yesType03.length
+            ? screenTable(yesType03, true)
+            : "<p>Καμία γραμμή.</p>"}
     </details>
+
     <details>
       <summary>Τύπος 02 με ποσό 0,02 · ${yesTwoCents.length}</summary>
-      ${yesTwoCents.length ? screenTable(yesTwoCents, true) : "<p>Καμία γραμμή.</p>"}
+      ${yesTwoCents.length
+            ? screenTable(yesTwoCents, true)
+            : "<p>Καμία γραμμή.</p>"}
     </details>
-    <h2 class="screen-next">Τύπος 02 για IP</h2>
-    <p>${countLabel(pending.length, "συναλλαγή", "συναλλαγές")} από ${countLabel(devices.length, "συσκευή", "συσκευές")}. Ποσό διαφορετικό από 0,02. Η απόφασή τους βγαίνει στο πόρισμα.</p>
-    ${pending.length ? `<details><summary>Προβολή γραμμών</summary>${screenTable(pending, false)}</details>` : ""}
-    <div class="actions">
-      <button type="button" class="primary" id="to-ips" onclick="goToStep(${continueStep})" ${importedRows.length ? "" : "disabled"}>${continueLabel}</button>
-    </div>
+
     <details>
       <summary>Εξαιρέσεις · ${excluded}</summary>
-      <p>Άκυρο ServiceAccountID (όχι CTVM και 8 ψηφία): ${excludedId.length}. Τύπος 04: ${excludedType.length}.</p>
-      ${excluded ? screenTable([...excludedId, ...excludedType], false) : ""}
+      <p>
+        Άκυρο ServiceAccountID (όχι CTVM και 8 ψηφία):
+        ${excludedId.length}.
+        Τύπος 04: ${excludedType.length}.
+      </p>
+      ${excluded
+            ? screenTable([...excludedId, ...excludedType], false)
+            : ""}
     </details>
+
     ${other.length ? `
       <details>
         <summary>Χωρίς κανόνα · ${other.length}</summary>
-        <p>Τύπος 01 και ό,τι άλλο δεν είναι 02, 03 ή 04 μένει εδώ. Δεν γίνεται YES και δεν πάει σε IP.</p>
+        <p>
+          Τύπος 01 και ό,τι άλλο δεν είναι 02, 03 ή 04
+          μένει εδώ. Δεν γίνεται YES και δεν πάει σε IP.
+        </p>
         ${screenTable(other, false)}
-      </details>` : ""}
+      </details>
+    ` : ""}
+
+    <div class="workflow-mode">
+      <h2>Πώς θέλεις να εργαστείς;</h2>
+
+      <div class="actions">
+        <button
+          type="button"
+          class="primary"
+          onclick="startBatchWorkflow()">
+          Όλες οι συσκευές μαζί
+        </button>
+
+        <button
+          type="button"
+          onclick="startIndividualWorkflow()">
+          Μία συσκευή κάθε φορά
+        </button>
+      </div>
+    </div>
+
+    <h2 class="screen-next">
+      Συσκευές · ${investigationDevices.length}
+    </h2>
+
+    <div class="device-list">
+      ${investigationDevices.map((device) => `
+        <details class="investigation-device">
+          <summary onclick="selectInvestigationDevice('${device.id}')">
+            ${escapeHtml(device.serviceAccountId)}
+          </summary>
+
+          <p>Κατάσταση Ping: ${escapeHtml(device.pingStatus)}</p>
+          <p>Κατάσταση Logs: ${escapeHtml(device.logsStatus)}</p>
+        </details>
+      `).join("")}
+    </div>
   `;
 }
+
 
 function screenTable(rows, showDecision) {
   const headers = ["ServiceAccountID", "Τύπος", "Amount", "Λόγος", "TransactionID"];
@@ -1442,10 +1670,12 @@ function renderIps() {
     </div>
     <pre id="ip-log" class="run-log"></pre>
     <div class="actions">
-      <button type="button" onclick="goToStep(1)">Πίσω στο Excel</button>
-      <button type="button" class="primary" id="ip-lookup" onclick="resolveIpsFromFiles()">Φόρτωση IP από αρχεία</button>
-      <button type="button" id="ssh-ping" onclick="pingDevices()" disabled>Ping</button>
-      <button type="button" class="primary" onclick="goToStep(3)">Συνέχεια στα logs</button>
+    ${deviceWorkflowActive
+          ? `<button type="button" onclick="returnToDeviceList()">Πίσω στις συσκευές</button>`
+          : `<button type="button" onclick="goToStep(1)">Πίσω στο Excel</button>`
+}
+      <button type="button" id="ssh-ping" onclick="runPingForCurrentMode()" disabled>Ping</button>
+      <button type="button" class="primary" id="to-logs" onclick="goToStep(3)" disabled> Συνέχεια στα logs </button>
     </div>
   `;
   resolveIpsFromFiles();
@@ -1476,7 +1706,14 @@ function renderDeviceRows() {
     <div class="device-row ip-row${oasa ? " oasa-row" : ""}" style="color:var(--muted); font-size:11px; letter-spacing:.04em; text-transform:uppercase;">
       <span>CTVM</span><span>Τύπος</span><span>IP</span>${oasa ? "<span>Τερματικό</span><span>Σταθμός</span>" : "<span>Όχημα</span>"}<span>Ping</span>
     </div>
-    ${devices.map((device) => `
+    ${(deviceWorkflowActive
+          ? devices.filter((device) =>
+              device.serviceAccountId ===
+              investigationDevices.find(
+                  (item) => item.id === selectedInvestigationDeviceId
+              )?.serviceAccountId
+          )
+          : devices).map((device) => `
       <div class="device-row ip-row${oasa ? " oasa-row" : ""}">
         <span class="mono">${escapeHtml(device.serviceAccountId)}</span>
         <span>${mobilityLabel(device.mobility)}</span>
@@ -1555,8 +1792,29 @@ function devicesWithIp() {
   return devices.filter((device) => String(device.ip || "").trim());
 }
 
-async function pingDevices() {
-  const target = devicesWithIp();
+function runPingForCurrentMode() {
+    if (deviceWorkflowActive) {
+        const selectedDevice = investigationDevices.find(
+            (item) => item.id === selectedInvestigationDeviceId
+        );
+
+        if (!selectedDevice) {
+            return;
+        }
+
+        pingDevices(selectedDevice.serviceAccountId);
+        return;
+    }
+
+    pingDevices();
+}
+
+async function pingDevices(serviceAccountId = null) {
+    const target = serviceAccountId
+        ? devicesWithIp().filter(
+            (device) => device.serviceAccountId === serviceAccountId
+        )
+        : devicesWithIp();
   const button = document.querySelector("#ssh-ping");
   if (!target.length) {
     setIpLog("Πρώτα χρειάζεται IP για να σταλεί SSH ping.");
@@ -1584,10 +1842,18 @@ async function pingDevices() {
   }
   if (!response.ok) {
     refreshPingButton();
-    setIpLog(payload.message || "Το SSH ping απέτυχε.");
+      setIpLog(payload.message || "Το SSH ping απέτυχε.");
+      const continueButton = document.querySelector("#to-logs");
+      if (continueButton) {
+          continueButton.disabled = true;
+      }
     return;
   }
+
+  reachedIps = true;
+
   const results = Array.isArray(payload) ? payload : [];
+
   for (const result of results) {
     const device = devices.find((item) => item.serviceAccountId === result.serviceAccountId);
     if (!device) {
@@ -1600,7 +1866,26 @@ async function pingDevices() {
   const list = document.querySelector("#ip-devices");
   if (list) {
     list.innerHTML = renderDeviceRows();
-  }
+    }
+    const continueButton = document.querySelector("#to-logs");
+
+    if (continueButton) {
+        const selectedDevice = investigationDevices.find(
+            (item) => item.id === selectedInvestigationDeviceId
+        );
+
+        const sourceDevice = deviceWorkflowActive
+            ? devices.find(
+                (item) => item.serviceAccountId === selectedDevice?.serviceAccountId
+            )
+            : null;
+
+        const canContinue = deviceWorkflowActive
+            ? readyToDownload(sourceDevice || {})
+            : devicesWithIp().some(readyToDownload);
+
+        continueButton.disabled = !canContinue;
+    }
   refreshPingButton();
   const ok = results.filter((item) => item.reachable).length;
   setIpLog([
@@ -1622,8 +1907,19 @@ function readyToDownload(device) {
 }
 
 function renderDownload() {
-  const readyDevices = devices.filter(readyToDownload);
-  const skippedDevices = devices.filter((device) => !readyToDownload(device));
+    const visibleDevices = deviceWorkflowActive
+        ? devices.filter((device) =>
+            device.serviceAccountId ===
+            investigationDevices.find(
+                (item) => item.id === selectedInvestigationDeviceId
+            )?.serviceAccountId
+        )
+        : devices;
+
+    const readyDevices = visibleDevices.filter(readyToDownload);
+    const skippedDevices = visibleDevices.filter(
+        (device) => !readyToDownload(device)
+    );
   const fixed = readyDevices.filter((device) => device.mobility === "Fixed");
   const mobile = readyDevices.filter((device) => device.mobility === "Mobile");
   const other = readyDevices.filter((device) => device.mobility !== "Fixed" && device.mobility !== "Mobile");
@@ -1649,8 +1945,11 @@ function renderDownload() {
     <section id="log-slice" class="log-slice" hidden></section>
     <pre id="dl-log" class="run-log"></pre>
     <div class="actions">
-      <button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>
-      <button type="button" class="primary" id="start-download" onclick="startLogDownload()" ${readyDevices.length ? "" : "disabled"}>Κατέβασμα με scp</button>
+<div class="actions">
+  ${deviceWorkflowActive
+          ? `<button type="button" onclick="returnToDeviceList()">Πίσω στις συσκευές</button>`
+          : `<button type="button" id="back-tb" onclick="goToStep(2)">Πίσω στις IPs</button>`
+  }      <button type="button" class="primary" id="start-download" onclick="startLogDownload()" ${readyDevices.length ? "" : "disabled"}>Κατέβασμα με scp</button>
       <button type="button" class="primary" id="to-process" onclick="goToStep(4)">Συνέχεια στο πόρισμα</button>
     </div>
   `;
@@ -1754,7 +2053,21 @@ function pingDownloadLabel(device) {
 }
 
 async function startLogDownload() {
-  const target = devices.filter(readyToDownload);
+    const target = devices.filter((device) => {
+        if (!readyToDownload(device)) {
+            return false;
+        }
+
+        if (deviceWorkflowActive) {
+            const selectedDevice = investigationDevices.find(
+                (item) => item.id === selectedInvestigationDeviceId
+            );
+
+            return device.serviceAccountId === selectedDevice?.serviceAccountId;
+        }
+
+        return true;
+    });
   for (const device of devices) {
     if (target.includes(device)) {
       continue;
@@ -1843,11 +2156,30 @@ function applyDownloadStatus(status) {
     if (!device) {
       continue;
     }
-    device.downloadStatus = result.message || result.status;
-    if (result.localPath) {
-      device.localPath = result.localPath;
-      noteDeskLogs(device.serviceAccountId);
-    }
+      device.downloadStatus = result.message || result.status;
+
+      if (result.localPath) {
+          device.localPath = result.localPath;
+          noteDeskLogs(device.serviceAccountId);
+      }
+
+      const investigationDevice = investigationDevices.find(
+          (item) => item.serviceAccountId === result.serviceAccountId
+      );
+
+      if (investigationDevice && ["downloaded", "error"].includes(result.status)) {
+          investigationDevice.logsStatus = result.status;
+          investigationDevice.currentStep =
+              result.status === "downloaded" ? "finding" : "logs";
+
+          fetch(`/api/devices/investigation/${investigationDevice.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(investigationDevice)
+          }).catch((error) => {
+              console.error("Αποτυχία αποθήκευσης κατάστασης Logs:", error);
+          });
+      }
   }
   document.querySelectorAll(".dl-row").forEach((row) => {
     const id = row.querySelector(".ip-edit")?.dataset.id;
@@ -1957,8 +2289,8 @@ function clockFromOsethId(id) {
   if (digits.length < 9) {
     return null;
   }
-  const hh = digits.slice(5, 7);
-  const mm = digits.slice(7, 9);
+  const hh = digits.slice(4, 6);
+  const mm = digits.slice(6, 8);
   const hour = Number(hh);
   const minute = Number(mm);
   if (hour > 23 || minute > 59) {
@@ -2230,7 +2562,14 @@ function refreshDevices() {
 
     const map = new Map();
 
-    for (const row of needsIpRows()) {
+    const rowsForDevices = importProfile === "OASA"
+        ? importedRows.filter((row) =>
+            ["NeedsIp", "AutomaticYes"].includes(row.disposition) &&
+            row.immediate?.serviceAccountId
+        )
+        : needsIpRows();
+
+    for (const row of rowsForDevices) {
         const id = row.immediate.serviceAccountId;
 
         if (!id) {

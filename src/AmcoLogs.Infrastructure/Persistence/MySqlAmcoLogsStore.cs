@@ -1,8 +1,9 @@
-using System.Text.Json;
+using AmcoLogs.Core.Device;
 using AmcoLogs.Core.Excel;
 using AmcoLogs.Core.Logs;
 using AmcoLogs.Core.Persistence;
 using MySqlConnector;
+using System.Text.Json;
 
 namespace AmcoLogs.Infrastructure.Persistence;
 
@@ -114,11 +115,13 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                 INSERT INTO excel_import_rows (
                     id, batch_id, `row_number`, service_account_id, rrn, amount,
                     eticket_transaction_result, decision, transaction_id, transaction_date,
-                    mobility, extra_json)
+                    mobility, extra_json,
+                    oasa_terminal, ctvm_number, resolved_ip, station_name)
                 VALUES (
                     @id, @batchId, @rowNumber, @serviceAccountId, @rrn, @amount,
                     @result, @decision, @transactionId, @transactionDate,
-                    @mobility, @extraJson);
+                    @mobility, @extraJson,
+                    @oasaTerminal, @ctvmNumber, @resolvedIp, @stationName);
                 """, connection, transaction);
 
             insert.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
@@ -133,7 +136,75 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             insert.Parameters.AddWithValue("@transactionDate", (object?)row.Immediate.TransactionDate ?? DBNull.Value);
             insert.Parameters.AddWithValue("@mobility", row.Mobility.ToString());
             insert.Parameters.AddWithValue("@extraJson", JsonSerializer.Serialize(row.Archive.ExtraCodes));
+            insert.Parameters.AddWithValue("@oasaTerminal", (object?)row.OasaTerminal ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@ctvmNumber", (object?)row.Immediate.ServiceAccountId is not null
+                && import.Profile == ExcelImportResult.OasaProfile
+                    ? row.Immediate.ServiceAccountId
+                    : DBNull.Value);
+            insert.Parameters.AddWithValue("@resolvedIp", (object?)row.ResolvedIp ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@stationName", (object?)row.StationName ?? DBNull.Value);
             await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // Δημιουργούμε μία εγγραφή για κάθε διαφορετική συσκευή.
+        var devices = import.Rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.InvestigationServiceAccountId))
+            .GroupBy(
+                row => row.InvestigationServiceAccountId!,
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var deviceGroup in devices)
+        {
+            var device = deviceGroup.First();
+            var now = DateTime.UtcNow;
+
+            await using var insertDevice = new MySqlCommand(
+                """
+                INSERT INTO investigation_devices (
+                    id,
+                    batch_id,
+                    service_account_id,
+                    mobility,
+                    ctvm_number,
+                    ip_address,
+                    station_name,
+                    ping_status,
+                    logs_status,
+                    finding_status,
+                    current_step,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    @id,
+                    @batchId,
+                    @serviceAccountId,
+                    @mobility,
+                    @ctvmNumber,
+                    @ipAddress,
+                    @stationName,
+                    'pending',
+                    'pending',
+                    'pending',
+                    'ping',
+                    @createdAt,
+                    @updatedAt
+                );
+                """,
+                connection,
+                transaction);
+
+            insertDevice.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
+            insertDevice.Parameters.AddWithValue("@batchId", batchId.ToString());
+            insertDevice.Parameters.AddWithValue("@serviceAccountId", deviceGroup.Key);
+            insertDevice.Parameters.AddWithValue("@mobility", device.Mobility.ToString());
+            insertDevice.Parameters.AddWithValue("@ctvmNumber", (object?)device.Immediate.ServiceAccountId is not null && import.Profile == ExcelImportResult.OasaProfile ? device.Immediate.ServiceAccountId: DBNull.Value);
+            insertDevice.Parameters.AddWithValue("@ipAddress", (object?)device.ResolvedIp ?? DBNull.Value);
+            insertDevice.Parameters.AddWithValue("@stationName", (object?)device.StationName ?? DBNull.Value);
+            insertDevice.Parameters.AddWithValue("@createdAt", now);
+            insertDevice.Parameters.AddWithValue("@updatedAt", now);
+
+            await insertDevice.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
@@ -186,7 +257,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
             var title = ExcelBatchTitle.Parse(fileName);
             results.Add(new SavedExcelImport
             {
-                BatchId = Guid.Parse(reader.GetString("id")),
+                BatchId = reader.GetGuid("id"),
                 FileName = fileName,
                 Title = title.Label,
                 FileDate = title.FileDate,
@@ -232,6 +303,120 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         }
 
         return results;
+    }
+
+    public async Task<IReadOnlyList<InvestigationDevice>> ListInvestigationDevicesAsync(
+    Guid batchId,
+    CancellationToken cancellationToken = default)
+    {
+        var settings = CurrentSettings();
+        if (settings is null)
+        {
+            return [];
+        }
+
+        await using var connection = new MySqlConnection(
+            BuildConnectionString(settings, includeDatabase: true));
+
+        await connection.OpenAsync(cancellationToken);
+        await EnsureSchemaAsync(connection, cancellationToken);
+
+        await using var command = new MySqlCommand(
+            """
+        SELECT
+            id,
+            batch_id,
+            service_account_id,
+            mobility,
+            ctvm_number,
+            ip_address,
+            station_name,
+            ping_status,
+            logs_status,
+            finding_status,
+            current_step,
+            created_at,
+            updated_at
+        FROM investigation_devices
+        WHERE batch_id = @batchId
+        ORDER BY service_account_id;
+        """,
+            connection);
+
+        command.Parameters.AddWithValue("@batchId", batchId.ToString());
+
+        var results = new List<InvestigationDevice>();
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(new InvestigationDevice
+            {
+                Id = reader.GetGuid("id"),
+                BatchId = reader.GetGuid("batch_id"),
+                ServiceAccountId = reader.GetString("service_account_id"),
+                Mobility = reader.GetString("mobility"),
+
+                CtvmNumber = reader.IsDBNull(reader.GetOrdinal("ctvm_number"))
+                    ? null
+                    : reader.GetString("ctvm_number"),
+
+                IpAddress = reader.IsDBNull(reader.GetOrdinal("ip_address"))
+                    ? null
+                    : reader.GetString("ip_address"),
+
+                StationName = reader.IsDBNull(reader.GetOrdinal("station_name"))
+                    ? null
+                    : reader.GetString("station_name"),
+
+                PingStatus = reader.GetString("ping_status"),
+                LogsStatus = reader.GetString("logs_status"),
+                FindingStatus = reader.GetString("finding_status"),
+                CurrentStep = reader.GetString("current_step"),
+                CreatedAt = reader.GetDateTime("created_at"),
+                UpdatedAt = reader.GetDateTime("updated_at")
+            });
+        }
+
+        return results;
+    }
+
+    public async Task UpdateInvestigationDeviceAsync(
+    InvestigationDevice device,
+    CancellationToken cancellationToken = default)
+    {
+        var settings = RequireSettings();
+
+        await using var connection = new MySqlConnection(
+            BuildConnectionString(settings, includeDatabase: true));
+
+        await connection.OpenAsync(cancellationToken);
+        await EnsureSchemaAsync(connection, cancellationToken);
+
+        await using var command = new MySqlCommand(
+            """
+        UPDATE investigation_devices
+        SET
+            ping_status = @pingStatus,
+            logs_status = @logsStatus,
+            finding_status = @findingStatus,
+            current_step = @currentStep,
+            updated_at = @updatedAt
+        WHERE id = @id
+          AND batch_id = @batchId;
+        """,
+            connection);
+
+        command.Parameters.AddWithValue("@pingStatus", device.PingStatus);
+        command.Parameters.AddWithValue("@logsStatus", device.LogsStatus);
+        command.Parameters.AddWithValue("@findingStatus", device.FindingStatus);
+        command.Parameters.AddWithValue("@currentStep", device.CurrentStep);
+        command.Parameters.AddWithValue("@updatedAt", DateTime.UtcNow);
+        command.Parameters.AddWithValue("@id", device.Id.ToString());
+        command.Parameters.AddWithValue("@batchId", device.BatchId.ToString());
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<DeviceIpMapping>> ListDeviceIpsAsync(CancellationToken cancellationToken = default)
@@ -438,7 +623,7 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
 
     private static StoredExcelRow ReadStoredRow(MySqlDataReader reader) => new()
     {
-        BatchId = Guid.Parse(reader.GetString("batch_id")),
+        BatchId = reader.GetGuid("batch_id"),
         FileName = reader.GetString("file_name"),
         ImportedAt = reader.GetDateTime("imported_at"),
         RowNumber = reader.GetInt32("row_number"),
@@ -586,6 +771,34 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
                     ON DELETE CASCADE
             )
             """,
+
+            """
+            CREATE TABLE IF NOT EXISTS investigation_devices (
+                id CHAR(36) NOT NULL PRIMARY KEY,
+                batch_id CHAR(36) NOT NULL,
+                service_account_id VARCHAR(64) NOT NULL,
+                mobility VARCHAR(16) NOT NULL,
+
+                ping_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                logs_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                finding_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+
+                current_step VARCHAR(32) NOT NULL DEFAULT 'ping',
+
+                created_at DATETIME(6) NOT NULL,
+                updated_at DATETIME(6) NOT NULL,
+
+                UNIQUE KEY uq_investigation_device (
+                    batch_id,
+                    service_account_id
+                ),
+
+                CONSTRAINT fk_investigation_device_batch
+                    FOREIGN KEY (batch_id)
+                    REFERENCES excel_import_batches(id)
+                    ON DELETE CASCADE
+            )
+            """,
             """
             CREATE TABLE IF NOT EXISTS device_ip_mappings (
                 service_account_id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -675,6 +888,55 @@ public sealed class MySqlAmcoLogsStore : IAmcoLogsStore
         {
             await ExecuteAsync(connection, "ALTER TABLE device_ip_mappings ADD COLUMN bus_no VARCHAR(64) NULL;", cancellationToken);
         }
+        if (!await ColumnExistsAsync(connection, "excel_import_rows", "oasa_terminal", cancellationToken))
+        {
+            await ExecuteAsync(connection,
+                "ALTER TABLE excel_import_rows ADD COLUMN oasa_terminal VARCHAR(64) NULL;",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(connection, "excel_import_rows", "ctvm_number", cancellationToken))
+        {
+            await ExecuteAsync(connection,
+                "ALTER TABLE excel_import_rows ADD COLUMN ctvm_number VARCHAR(64) NULL;",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(connection, "excel_import_rows", "resolved_ip", cancellationToken))
+        {
+            await ExecuteAsync(connection,
+                "ALTER TABLE excel_import_rows ADD COLUMN resolved_ip VARCHAR(64) NULL;",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(connection, "excel_import_rows", "station_name", cancellationToken))
+        {
+            await ExecuteAsync(connection,
+                "ALTER TABLE excel_import_rows ADD COLUMN station_name VARCHAR(255) NULL;",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(connection, "investigation_devices", "ctvm_number", cancellationToken))
+        {
+            await ExecuteAsync(connection,
+                "ALTER TABLE investigation_devices ADD COLUMN ctvm_number VARCHAR(64) NULL;",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(connection, "investigation_devices", "ip_address", cancellationToken))
+        {
+            await ExecuteAsync(connection,
+                "ALTER TABLE investigation_devices ADD COLUMN ip_address VARCHAR(64) NULL;",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(connection, "investigation_devices", "station_name", cancellationToken))
+        {
+            await ExecuteAsync(connection,
+                "ALTER TABLE investigation_devices ADD COLUMN station_name VARCHAR(255) NULL;",
+                cancellationToken);
+        }
+
     }
 
     private static async Task<bool> ColumnExistsAsync(

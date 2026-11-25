@@ -2,3 +2,57 @@
 # Μία γραμμή ανά βήμα, με τη σειρά. Ως 20 γραμμές.
 # Μπορείς να επικολλήσεις ολόκληρη γραμμή log. Η ώρα και οι αριθμοί δεν χρειάζεται να ταιριάζουν.
 # Οι γραμμές που αρχίζουν με # αγνοούνται.
+
+>> 1. Product selection & preparation
+
+2026-11-02 13:53:15.4367|INFO | TVMServer.Services.TicketSaleOrchestrator|Selecting product 70 Λεπτών Αστική Ζώνη
+2026-11-02 13:53:15.4856|INFO | TVMServer.Devices.PaperTicketDispenser.Device|Select the reel 1
+2026-11-02 13:53:15.5012|INFO | TVMServer.Devices.PaperTicketDispenser.Device|Reel with id = 1 configured
+2026-11-02 13:53:15.5012|INFO | TVMServer.Managers.TicketingManager|Counting consumables for SmartPaperTicketLUC at roll #1
+
+>> 2. Payment initialization
+
+2026-11-02 13:53:17.7005|INFO | TVMServer.Services.TicketSaleOrchestrator|Payment requested
+2026-11-02 13:53:17.7005|INFO | TVMServer.Services.TicketSaleOrchestrator|Setting TicketSaleOrchstrator state from IDLE to PAYMENT_START_PENDING
+2026-11-02 13:53:17.7651|TRACE | TVMServer.Services.TicketSaleOrchestrator|Total calculated cost is: (6000.0000000000000000000000000 cents (per item) + 0) fare media cost * 1 products = 60.000000000000000000000000000 cents
+2026-11-02 13:53:17.7651|INFO | TVMServer.Managers.PaymentManager|Payment Manager - Payment transaction started.
+2026-11-02 13:53:17.7651|INFO | TVMServer.Managers.PaymentManager|PaymentMethod in PaymentManager from UI
+2026-11-02 13:53:17.7651|INFO | TVMServer.Managers.PaymentManager|Setting payment method to: Card
+2026-11-02 13:53:17.8164|INFO | TVMServer.Devices.Cashless.MellonDevice|Mellon DebitStart - Starting cashless debit
+
+>> 3. Payment completion
+
+2026-11-02 13:53:27.9392|INFO | TVMServer.Devices.Cashless.MellonDevice|Mellon received debit results: {"Result":"OK",...}
+2026-11-02 13:53:27.9453|INFO | TVMServer.Managers.PaymentManager|Received cashless amount: 60
+2026-11-02 13:53:27.9843|INFO | TVMServer.Services.TicketSaleOrchestrator|Payment amount completed: 60
+
+
+>> 4. Ticket dispense initialization
+
+2026-11-02 13:53:28.9292|INFO | TVMServer.Controllers.TicketSaleController|DISPENSE OR TOP-UP?: isTopUp: false, IsCardInserted? false
+2026-11-02 13:53:28.9292|INFO | TVMServer.Services.TicketSaleOrchestrator|Dispense requested for 1 card(s)
+2026-11-02 13:53:28.9292|INFO | TVMServer.Services.TicketSaleOrchestrator|Setting TicketSaleOrchstrator state from PAYMENT_COMPLETE to TICKET_DISPENSE_STARTED
+2026-11-02 13:53:29.2008|INFO | TVMServer.Managers.TicketingManager|Dispense Paper card started (iteration=0).
+2026-11-02 13:53:29.2008|INFO | TVMServer.Managers.TicketingManager|Dispense attempt #1
+2026-11-02 13:53:29.2008|INFO | TVMServer.Devices.PaperTicketDispenser.Device|Select the reel 1
+2026-11-02 13:53:29.2076|INFO | TVMServer.Devices.PaperTicketDispenser.Device|Reel with id = 1 configured
+2026-11-02 13:53:29.2084|TRACE | TVMServer.Managers.TicketingManager|Preparing a paper dispencer smart ticket template
+2026-11-02 13:53:29.2130|TRACE | TVMServer.Transports.Mqtt.MqttRpcCall|Creating RPC call, guid: 41215ecb-e663-4ad8-aee8-1cca57c4026c, topic: amco/tvm/paperticket/dispenser/print, payload: [...]
+
+>> 5. RFID read & card writing
+
+2026-11-02 13:53:35.4524|INFO | TVMServer.Managers.TicketingManager|METHOD: CreateDispenseCard | Vat : 0.13 ---> PROCEED LOAD_AND_TOP_UP_PRODUCTS
+2026-11-02 13:53:35.4524|INFO | TVMServer.Services.Cards.CardLucV2Service|Write StoredJourneys product on Smart Card.
+2026-11-02 13:53:35.4663|TRACE | TVMServer.Transports.Mqtt.MqttRpcCall|Creating RPC call, guid: 4b730dd8-70a7-4893-9de5-0b22726abe2e, topic: amco/tvm/paperticket/rfid/card/write, payload: [...]
+2026-11-02 13:53:35.6847|TRACE | TVMServer.Transports.Mqtt.MqttTransport|HandleRpcResponse (topic: amco/tvm/paperticket/rfid/card/write/response/4b730dd8-70a7-4893-9de5-0b22726abe2e)
+2026-11-02 13:53:35.6847|TRACE | TVMServer.Transports.Mqtt.MqttTransport|Got response for Topic = amco/tvm/paperticket/rfid/card/write/request/4b730dd8-70a7-4893-9de5-0b22726abe2e -> {"completed":true,...}
+
+>> 6. Successful completion & reset
+
+2026-11-02 13:53:37.4324|TRACE | TVMServer.Services.SignalRClientNotificationService|Sending notification to client: type=CurrentTicket data=1
+2026-11-02 13:53:37.4324|INFO | TVMServer.Services.TicketSaleOrchestrator|Setting TicketSaleOrchstrator state from TICKET_DISPENSE_STARTED to TICKET_DISPENSED
+2026-11-02 13:53:37.4367|INFO | TVMServer.Services.TicketSaleOrchestrator|Dispense completed
+2026-11-02 13:53:37.4367|INFO | TVMServer.Managers.PaymentManager|Payment transaction stopping... (AmountCompleted)
+2026-11-02 13:53:37.4406|INFO | TVMServer.Managers.PaymentManager|Payment transaction stopped
+2026-11-02 13:53:53.4417|INFO | TVMServer.Controllers.TicketSaleController|Reset is called from UI
+2026-11-02 13:53:53.4417|INFO | TVMServer.Services.TicketSaleOrchestrator|Resetting TicketSaleOrchestrator (success = True, ticketsale state: TICKET_DISPENSED)

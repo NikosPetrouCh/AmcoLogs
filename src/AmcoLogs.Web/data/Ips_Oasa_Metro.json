@@ -1,0 +1,320 @@
+[  
+  {
+    "station": "ΜΑΝΙΑΤΙΚΑ",
+    "ctvmNumber": "CTVM51239437",
+    "serviceAccountId": "1000002439",
+    "routerIp": "10.232.188.31"
+  },
+  {
+    "station": "ΜΑΝΙΑΤΙΚΑ",
+    "ctvmNumber": "CTVM51239433",
+    "serviceAccountId": "1000002440",
+    "routerIp": "10.232.188.32"
+  },
+  {
+    "station": "ΜΑΝΙΑΤΙΚΑ",
+    "ctvmNumber": "CTVM51239432",
+    "serviceAccountId": "1000002441",
+    "routerIp": "10.232.188.33"
+  },
+  {
+    "station": "ΜΑΝΙΑΤΙΚΑ",
+    "ctvmNumber": "CTVM51239436",
+    "serviceAccountId": "1000002442",
+    "routerIp": "10.232.188.34"
+  },
+  {
+    "station": "ΜΑΝΙΑΤΙΚΑ",
+    "ctvmNumber": "CTVM51239435",
+    "serviceAccountId": "1000002443",
+    "routerIp": "10.232.188.35"
+  },
+  {
+    "station": "ΜΑΝΙΑΤΙΚΑ",
+    "ctvmNumber": "CTVM51239434",
+    "serviceAccountId": "1000002444",
+    "routerIp": "10.232.188.36"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239444",
+    "serviceAccountId": "1000002445",
+    "routerIp": "10.232.190.31"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239445",
+    "serviceAccountId": "1000002446",
+    "routerIp": "10.232.190.32"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239447",
+    "serviceAccountId": "1000002447",
+    "routerIp": "10.232.190.33"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239448",
+    "serviceAccountId": "1000002448",
+    "routerIp": "10.232.190.34"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239449",
+    "serviceAccountId": "1000002449",
+    "routerIp": "10.232.190.35"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239443",
+    "serviceAccountId": "1000002450",
+    "routerIp": "10.232.190.36"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239446",
+    "serviceAccountId": "1000002451",
+    "routerIp": "10.232.190.37"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239442",
+    "serviceAccountId": "1000002452",
+    "routerIp": "10.232.190.38"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239441",
+    "serviceAccountId": "1000002453",
+    "routerIp": "10.232.190.39"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239440",
+    "serviceAccountId": "1000002454",
+    "routerIp": "10.232.190.40"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239439",
+    "serviceAccountId": "1000002455",
+    "routerIp": "10.232.190.41"
+  },
+  {
+    "station": "ΔΗΜΟΤΙΚΟ ΘΕΑΤΡΟ",
+    "ctvmNumber": "CTVM51239438",
+    "serviceAccountId": "1000002456",
+    "routerIp": "10.232.190.42"
+  },
+  {
+    "station": "ΑΓΙΑ ΒΑΡΒΑΡΑ",
+    "ctvmNumber": "CTVM51239462",
+    "serviceAccountId": "1000002463",
+    "routerIp": "10.232.185.31"
+  },
+  {
+    "station": "ΑΓΙΑ ΒΑΡΒΑΡΑ",
+    "ctvmNumber": "CTVM51239463",
+    "serviceAccountId": "1000002464",
+    "routerIp": "10.232.185.32"
+  },
+  {
+    "station": "ΑΓΙΑ ΒΑΡΒΑΡΑ",
+    "ctvmNumber": "CTVM51239464",
+    "serviceAccountId": "1000002465",
+    "routerIp": "10.232.185.33"
+  },
+  {
+    "station": "ΑΓΙΑ ΒΑΡΒΑΡΑ",
+    "ctvmNumber": "CTVM51239465",
+    "serviceAccountId": "1000002466",
+    "routerIp": "10.232.185.34"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239486",
+    "serviceAccountId": "1000002467",
+    "routerIp": "10.232.189.31"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239487",
+    "serviceAccountId": "1000002468",
+    "routerIp": "10.232.189.32"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239488",
+    "serviceAccountId": "1000002469",
+    "routerIp": "10.232.189.33"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239489",
+    "serviceAccountId": "1000002470",
+    "routerIp": "10.232.189.34"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239490",
+    "serviceAccountId": "1000002471",
+    "routerIp": "10.232.189.35"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239491",
+    "serviceAccountId": "1000002472",
+    "routerIp": "10.232.189.36"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239492",
+    "serviceAccountId": "1000002473",
+    "routerIp": "10.232.189.37"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239493",
+    "serviceAccountId": "1000002474",
+    "routerIp": "10.232.189.38"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239494",
+    "serviceAccountId": "1000002475",
+    "routerIp": "10.232.189.39"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239495",
+    "serviceAccountId": "1000002476",
+    "routerIp": "10.232.189.40"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239496",
+    "serviceAccountId": "1000002477",
+    "routerIp": "10.232.189.41"
+  },
+  {
+    "station": "ΠΕΙΡΑΙΑΣ",
+    "ctvmNumber": "CTVM51239497",
+    "serviceAccountId": "1000002478",
+    "routerIp": "10.232.189.42"
+  },
+  {
+    "station": "ΚΟΡΥΔΑΛΛΟΣ",
+    "ctvmNumber": "CTVM51239457",
+    "serviceAccountId": "1000002479",
+    "routerIp": "10.232.186.31"
+  },
+  {
+    "station": "ΚΟΡΥΔΑΛΛΟΣ",
+    "ctvmNumber": "CTVM51239458",
+    "serviceAccountId": "1000002480",
+    "routerIp": "10.232.186.32"
+  },
+  {
+    "station": "ΚΟΡΥΔΑΛΛΟΣ",
+    "ctvmNumber": "CTVM51239459",
+    "serviceAccountId": "1000002481",
+    "routerIp": "10.232.186.33"
+  },
+  {
+    "station": "ΚΟΡΥΔΑΛΛΟΣ",
+    "ctvmNumber": "CTVM51239460",
+    "serviceAccountId": "1000002482",
+    "routerIp": "10.232.186.34"
+  },
+  {
+    "station": "ΚΟΡΥΔΑΛΛΟΣ",
+    "ctvmNumber": "CTVM51239461",
+    "serviceAccountId": "1000002483",
+    "routerIp": "10.232.186.35"
+  },
+  {
+    "station": "ΚΟΡΥΔΑΛΛΟΣ",
+    "ctvmNumber": "CTVM51239451",
+    "serviceAccountId": "1000002484",
+    "routerIp": "10.232.186.36"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239467",
+    "serviceAccountId": "1000002485",
+    "routerIp": "10.232.187.31"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239468",
+    "serviceAccountId": "1000002486",
+    "routerIp": "10.232.187.32"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239469",
+    "serviceAccountId": "1000002487",
+    "routerIp": "10.232.187.33"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239470",
+    "serviceAccountId": "1000002488",
+    "routerIp": "10.232.187.34"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239471",
+    "serviceAccountId": "1000002489",
+    "routerIp": "10.232.187.35"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239472",
+    "serviceAccountId": "1000002490",
+    "routerIp": "10.232.187.36"
+  },
+  {
+    "station": "ΑΓΙΑ ΒΑΡΒΑΡΑ",
+    "ctvmNumber": "CTVM51239480",
+    "serviceAccountId": "1000002497",
+    "routerIp": "10.232.185.35"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239481",
+    "serviceAccountId": "1000002498",
+    "routerIp": "10.232.187.37"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239482",
+    "serviceAccountId": "1000002499",
+    "routerIp": "10.232.187.38"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239466",
+    "serviceAccountId": "1000002500",
+    "routerIp": "10.232.187.39"
+  },
+  {
+    "station": "ΝΙΚΑΙΑ",
+    "ctvmNumber": "CTVM51239473",
+    "serviceAccountId": "1000002501",
+    "routerIp": "10.232.187.40"
+  },
+  {
+    "station": "ΑΓΙΑ ΒΑΡΒΑΡΑ",
+    "ctvmNumber": "CTVM51239484",
+    "serviceAccountId": "1000002503",
+    "routerIp": "10.232.185.36"
+  },
+  {
+    "station": "ΑΓΙΑ ΒΑΡΒΑΡΑ",
+    "ctvmNumber": "CTVM51239485",
+    "serviceAccountId": "1000002504",
+    "routerIp": "10.232.185.37"
+  }
+]
